@@ -58,37 +58,54 @@ class TransferRepository(
     fun startDownload(ip: String, port: Int, token: String, fileCount: Int, context: Context) {
         downloadJob?.cancel()
         downloadJob = scope.launch {
-            // Go out over Wi-Fi even when a VPN is the default network
-            val boundToWifi = LocalNetwork.bindProcessToWifi(context)
             try {
                 _progressFlow.value = 0f
                 _transferState.value = TransferState.Downloading(0f)
 
                 val destDir = File(context.cacheDir, "transfers")
-                val files = client.downloadAll(
-                    ip, port, token, fileCount, destDir,
-                    onProgress = { progress ->
-                        _progressFlow.value = progress
-                        _transferState.value = TransferState.Downloading(progress)
-                    },
-                    onFileVerified = { index, isValid ->
-                        _fileVerifiedFlow.value = index to isValid
-                    },
-                    onCorrupted = { corrupted, indices ->
-                        val current = _transferState.value
-                        if (current is TransferState.Complete) {
-                            _transferState.value = current.copy(corruptedFiles = corrupted, corruptedIndices = indices)
-                        }
+                var files: List<File>? = null
+                var lastError: Exception? = null
+                // First over the real Wi-Fi network (bypasses a VPN), then over the default network.
+                for (viaWifi in listOf(true, false)) {
+                    val bound = viaWifi && LocalNetwork.bindProcessToWifi(context)
+                    if (viaWifi && !bound) continue
+                    try {
+                        files = client.downloadAll(
+                            ip, port, token, fileCount, destDir,
+                            onProgress = { progress ->
+                                _progressFlow.value = progress
+                                _transferState.value = TransferState.Downloading(progress)
+                            },
+                            onFileVerified = { index, isValid ->
+                                _fileVerifiedFlow.value = index to isValid
+                            },
+                            onCorrupted = { corrupted, indices ->
+                                val current = _transferState.value
+                                if (current is TransferState.Complete) {
+                                    _transferState.value = current.copy(corruptedFiles = corrupted, corruptedIndices = indices)
+                                }
+                            }
+                        )
+                        break
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        lastError = e
+                    } finally {
+                        if (bound) LocalNetwork.unbind(context)
                     }
-                )
+                }
 
-                _transferState.value = TransferState.Complete(files)
+                val result = files
+                if (result == null) {
+                    val probe = LocalNetwork.probe(context, ip, port)
+                    throw java.io.IOException("${lastError?.message ?: "Unknown error"}\n$probe")
+                }
+                _transferState.value = TransferState.Complete(result)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 _transferState.value = TransferState.Failed(e.message ?: "Unknown error")
-            } finally {
-                if (boundToWifi) LocalNetwork.unbind(context)
             }
         }
     }

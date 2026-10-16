@@ -4,8 +4,15 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
 import java.net.Inet4Address
+import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.NetworkInterface
+import java.net.Socket
 
 /**
  * Finds and uses the phone's real local (Wi-Fi) network even when a VPN is the default
@@ -77,5 +84,26 @@ object LocalNetwork {
 
     fun unbind(context: Context) {
         runCatching { cm(context).bindProcessToNetwork(null) }
+    }
+
+    /**
+     * Tries to reach ip:port three ways so a failed transfer says WHY: over the default network,
+     * over the real Wi-Fi network, and with a ping. "No route to host" on all of them while both
+     * phones show the same Wi-Fi usually means the router isolates Wi-Fi clients from each other.
+     */
+    suspend fun probe(context: Context, ip: String, port: Int): String = withContext(Dispatchers.IO) {
+        fun attempt(open: () -> Socket): String = try {
+            open().use { it.connect(InetSocketAddress(ip, port), 2500) }
+            "ok"
+        } catch (e: Exception) {
+            "${e.javaClass.simpleName}: ${e.message ?: ""}".trim()
+        }
+        coroutineScope {
+            val wifi = wifiNetwork(context)
+            val default = async { attempt { Socket() } }
+            val viaWifi = async { if (wifi != null) attempt { wifi.socketFactory.createSocket() } else "no Wi-Fi network" }
+            val ping = async { runCatching { InetAddress.getByName(ip).isReachable(1500) }.getOrDefault(false) }
+            "default=${default.await()} | wifi=${viaWifi.await()} | ping=${if (ping.await()) "reply" else "none"}"
+        }
     }
 }
