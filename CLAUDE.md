@@ -142,6 +142,9 @@ val specularShiftX = (sin(time * 0.00063 * PI) * baseRPx * 0.12f).toFloat()
 val specularShiftY = (cos(time * 0.00047 * PI) * baseRPx * 0.09f).toFloat()
 ```
 - Two highlights (large soft + small pinpoint) drift slowly across the blob surface
+- **Everything is clipped to the morphing blob path** (`blobShape`): camera preview, glass layer, tint, highlights. There is no static circle or outer glow.
+- **Clear glass, not frosted**: the lens layer uses only `lens()` (no blur/vibrancy). The backdrop lens only supports rounded-rect SDF shapes (it throws for generic paths), so it renders in a circle and is clipped to the blob.
+- **Sender tint is a flat colour** (`accentColor`, alpha 0.80, no gradient, no aqua rim/shadow over it) so the receiver's camera can read a clean hue; white specular highlights have low saturation and are ignored by the matcher.
 - Creates illusion of liquid depth and movement
 - Frequencies slightly different to avoid static patterns
 

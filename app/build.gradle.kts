@@ -13,8 +13,8 @@ android {
         applicationId = "com.example.flash"
         minSdk = 26
         targetSdk = 35
-        versionCode = 20
-        versionName = "0.8.4-blob-camera, Oct 16"
+        versionCode = 21
+        versionName = "0.8.5-clear-glass, Oct 16"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

@@ -140,17 +140,19 @@ fun MotherCore(
             buildBlobPath(blobCx, blobCx, baseRPx, noiseRPx, time.toDouble())
         }
 
-        // ── Live camera, clipped to the morphing blob itself (no static circle) ──
-        if (viewfinderContent != null) {
-            val blobShape = remember(blobPath) {
-                object : androidx.compose.ui.graphics.Shape {
-                    override fun createOutline(
-                        size: androidx.compose.ui.geometry.Size,
-                        layoutDirection: androidx.compose.ui.unit.LayoutDirection,
-                        density: androidx.compose.ui.unit.Density
-                    ) = androidx.compose.ui.graphics.Outline.Generic(blobPath)
-                }
+        // Everything is clipped to the morphing blob itself: no static circle anywhere.
+        val blobShape = remember(blobPath) {
+            object : androidx.compose.ui.graphics.Shape {
+                override fun createOutline(
+                    size: androidx.compose.ui.geometry.Size,
+                    layoutDirection: androidx.compose.ui.unit.LayoutDirection,
+                    density: androidx.compose.ui.unit.Density
+                ) = androidx.compose.ui.graphics.Outline.Generic(blobPath)
             }
+        }
+
+        // ── Live camera (receiver scanning) ───────────────────────────────────
+        if (viewfinderContent != null) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -158,45 +160,33 @@ fun MotherCore(
             ) { viewfinderContent() }
         }
 
-        // ── Lens distortion layer: refracts photos behind the blob ───────────
-        // Skipped while the camera viewfinder sits behind the core: the lens layer is
-        // opaque and would hide the live preview.
+        // ── Clear glass: refracts what is behind the blob, no blur ────────────
+        // The backdrop lens only supports rounded-rect SDF shapes, so it renders in a
+        // circle and the result is clipped to the morphing blob. Skipped while the
+        // camera is showing (the lens would hide it).
         if (backdrop != null && !viewfinderActive) {
             val blobDiameterDp = with(density) { ((baseRPx + noiseRPx) * 2).toDp() }
             Box(
                 modifier = Modifier
-                    .size(blobDiameterDp)
-                    .align(Alignment.Center)
-                    .drawBackdrop(
-                        backdrop = backdrop,
-                        shape = { RoundedCornerShape(50) },
-                        effects = {
-                            vibrancy()
-                            blur(3f.dp.toPx())
-                            lens(16f.dp.toPx(), 32f.dp.toPx())
-                        },
-                        onDrawSurface = {
-                            drawRect(AquaGlow)
-                        }
-                    )
-            )
-        }
-
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val glowRadius = baseRPx * 1.5f
-            if (!viewfinderActive) drawCircle(
-                brush = Brush.radialGradient(
-                    colors = if (isDark) {
-                        listOf(AquaPulse.copy(alpha = 0.6f), AquaPulse.copy(alpha = 0.2f), Color.Transparent)
-                    } else {
-                        listOf(AquaPulse.copy(alpha = 0.3f), Color.Transparent)
-                    },
-                    center = center,
-                    radius = glowRadius
-                ),
-                radius = glowRadius,
-                center = center
-            )
+                    .fillMaxSize()
+                    .clip(blobShape)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(blobDiameterDp)
+                        .align(Alignment.Center)
+                        .drawBackdrop(
+                            backdrop = backdrop,
+                            shape = { RoundedCornerShape(50) },
+                            effects = {
+                                lens(16f.dp.toPx(), 32f.dp.toPx())
+                            },
+                            onDrawSurface = {
+                                drawRect(AquaGlow.copy(alpha = 0.10f))
+                            }
+                        )
+                )
+            }
         }
 
         // Animated specular wobble — the highlight drifts slowly across the surface
@@ -238,12 +228,12 @@ fun MotherCore(
             clipPath(blobPath) {
                 // ── Accent color overlay (color detection lock-on) ─────────────
                 if (accentColor != null) {
-                    drawRect(accentColor.copy(alpha = 0.85f))
+                    drawRect(accentColor.copy(alpha = 0.80f))  // flat colour so the camera can read its hue
                 }
 
                 if (!viewfinderActive) {
                 // ── Rim light: bright aqua glow on the bottom-right edge ──────
-                drawCircle(
+                if (accentColor == null) drawCircle(
                     brush = Brush.radialGradient(
                         colors = listOf(Color.Transparent, AquaPulse.copy(0.55f), Color.Transparent),
                         center = Offset(center.x + baseRPx * 0.55f, center.y + baseRPx * 0.5f),
@@ -288,7 +278,7 @@ fun MotherCore(
                 )
 
                 // ── Depth shadow: subtle dark gradient at the bottom ──────────
-                drawRect(
+                if (accentColor == null) drawRect(
                     brush = Brush.verticalGradient(
                         colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.18f)),
                         startY = center.y + baseRPx * 0.1f,
