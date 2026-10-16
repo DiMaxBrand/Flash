@@ -395,57 +395,6 @@ fun WorkbenchScreen(
             }
         }
 
-        // ── Pairing diagnostics (camera mode): what mDNS is doing, readable on the phone ──
-        if (uiState.cameraHandshakeEnabled) {
-            val handshakeLog by (cameraHandshakeManager ?: app.cameraHandshakeManager)
-                .status.collectAsStateWithLifecycle()
-            if (handshakeLog.isNotEmpty()) {
-                androidx.compose.material3.Text(
-                    text = handshakeLog.joinToString("\n"),
-                    color = androidx.compose.ui.graphics.Color.White,
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 8.dp)
-                        .background(
-                            androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.55f),
-                            RoundedCornerShape(12.dp)
-                        )
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
-                )
-            }
-        }
-
-        // ── Transfer failure, with the reason (otherwise the app just silently re-scans) ──
-        uiState.transferError?.let { reason ->
-            androidx.compose.material3.Text(
-                text = "Transfer failed: $reason",
-                color = androidx.compose.ui.graphics.Color.White,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 96.dp, start = 24.dp, end = 24.dp)
-                    .background(
-                        androidx.compose.ui.graphics.Color(0xFF7A1F1F).copy(alpha = 0.92f),
-                        RoundedCornerShape(16.dp)
-                    )
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
-            )
-        }
-
-        // ── Scan complete popup (springs up above buttons) ────────────────────
-        val showScanPopup = uiState.colorDetectionState == ColorDetectionState.Locked
-        val scanPopupColor = uiState.detectedPeerColor?.displayColor
-        if (scanPopupColor != null) {
-            ScanCompletePopup(
-                visible = showScanPopup,
-                lockedColor = scanPopupColor,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 96.dp)
-            )
-        }
-
         // ── Bottom area: two buttons or settings panel ───────────────────────
         SharedTransitionLayout(
             modifier = Modifier.align(Alignment.BottomCenter)
@@ -654,6 +603,62 @@ fun WorkbenchScreen(
             }
         }
 
+        // ── Status, errors and the scan popup: one column ABOVE everything else ──
+        // Drawn after MotherCore and the "+" button, and kept in the free band between the
+        // photo grid and the bottom buttons, so nothing (blob, "+", buttons) covers it.
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 160.dp, start = 16.dp, end = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // ── Pairing diagnostics (camera mode): what mDNS is doing, readable on the phone ──
+            if (uiState.cameraHandshakeEnabled) {
+                val handshakeLog by (cameraHandshakeManager ?: app.cameraHandshakeManager)
+                    .status.collectAsStateWithLifecycle()
+                if (handshakeLog.isNotEmpty()) {
+                    androidx.compose.material3.Text(
+                        text = handshakeLog.joinToString("\n"),
+                        color = androidx.compose.ui.graphics.Color.White,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier
+                            .background(
+                                androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.55f),
+                                RoundedCornerShape(12.dp)
+                            )
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
+                }
+            }
+
+            // ── Transfer failure, with the reason (otherwise the app just silently re-scans) ──
+            uiState.transferError?.let { reason ->
+                androidx.compose.material3.Text(
+                    text = "Transfer failed: $reason",
+                    color = androidx.compose.ui.graphics.Color.White,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier
+                        .background(
+                            androidx.compose.ui.graphics.Color(0xFF7A1F1F).copy(alpha = 0.92f),
+                            RoundedCornerShape(16.dp)
+                        )
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                )
+            }
+
+            // ── Scan complete popup (springs up above buttons) ────────────────────
+            val showScanPopup = uiState.colorDetectionState == ColorDetectionState.Locked
+            val scanPopupColor = uiState.detectedPeerColor?.displayColor
+            if (scanPopupColor != null) {
+                ScanCompletePopup(
+                    visible = showScanPopup,
+                    lockedColor = scanPopupColor,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+        }
     }
 }
 
