@@ -39,30 +39,26 @@ Verify build succeeds: `./gradlew clean assembleDebug`
 
 ## Git Workflow & PR Management
 
-### Working Branches (ONLY)
-The **only** branches you should use are:
-1. **`claude-code`** — Your feature/development branch (long-lived)
-2. **`develop`** — The primary working branch going forward. Every push to `develop` also builds and publishes a release.
-3. **`main`** — Kept in sync with `develop`. Pushes to either `main` or `develop` build the APK in CI and publish a GitHub release (`.github/workflows/build.yml`); that release is how changes reach the user's phone. The workflow file must exist on a branch for pushes to that branch to build, so keep it identical on all branches.
+### Branch Model
+- **`develop`** — the cutting edge. All work lands here; every push builds the APK in CI and publishes a GitHub release (`.github/workflows/build.yml`).
+- **`main`** — "known to work". **Current phase: the app does not yet reliably transfer files, so `main` is kept identical to `develop`** (push both). **Once the user says transfers work (even badly), stop syncing**: `main` then only moves to a `develop` state the user has confirmed works, and `develop` keeps running ahead. Do not assume that switch has happened until the user says so.
+- The workflow file must exist on a branch for pushes to it to build — keep `.github/workflows/build.yml` identical on `develop` and `main`.
+- Other branches are legacy/session leftovers (`claude-code`, `claude/*`): never base new work on them. The cloud session harness may hand you a `claude/...` branch; push your work to it if told, but also land it on `develop`.
 
 ### Delivery (standing authorization from the user)
-The user develops without a computer and installs APKs from GitHub releases. They have **explicitly and permanently authorized pushing directly to `main`** (and resetting `develop` to match it) whenever work is built and ready, so releases happen without asking each time. Always compile first (`./gradlew assembleDebug`); in the sandbox use a Maven Central mirror via a `~/.gradle/init.d` script if repo.maven.apache.org rate-limits (429/404), and install the Android SDK (platform 36, build-tools 34) if missing. If an auto-mode permission check still blocks the push, stop and tell the user rather than working around it.
-
-**Important**: Do NOT create temporary feature branches like `claude/resume-after-network-issues`. All work goes on `claude-code`.
+The user develops without a computer and installs APKs from GitHub releases. They have **explicitly and permanently authorized pushing directly to `develop` and `main`** (including force-resetting `develop`/`main` to match each other) whenever work is built and ready, so releases happen without asking each time. Always compile first (`./gradlew assembleDebug`); in the sandbox install the Android SDK (platform 36, build-tools 34) if missing, and use a Maven Central mirror via a `~/.gradle/init.d` script if repo.maven.apache.org rate-limits (429/404). If an auto-mode permission check still blocks a push, stop and tell the user rather than working around it. Put `[skip ci]` in the commit message of docs-only commits so they do not publish a duplicate release.
 
 ### Workflow
 ```
-1. Work on claude-code branch locally
-2. Push to origin/claude-code: git push -u origin claude-code
-3. Create PR: claude-code → develop (automated merge after build passes)
-4. Develop automatically merges to main when ready (CI gates this)
-5. CodeRabbit reviews only happen on PRs targeting main
+1. Change code on develop, bump versionCode/versionName (see Version Management)
+2. ./gradlew assembleDebug  — must pass
+3. git push origin develop   (and, while in the "main = develop" phase, git push origin develop:main)
+4. CI builds and publishes the release; give the user the release link
 ```
 
 ### Critical Rules
-- **Only 4 branches exist** — anything else is abandoned/ignored
 - **Never create draft PRs** — they bypass CodeRabbit entirely
-- **Never target develop for CodeRabbit review** — CodeRabbit is configured for `main` only
+- **CodeRabbit** only reviews PRs targeting `main`; the normal flow no longer uses PRs (direct pushes), so it is mostly idle
 - **All PR descriptions must be clean** — no auto-generated footers; they interfere with CodeRabbit command parsing
 - **Commit messages should explain WHY**, not just WHAT
 - **Version management** (CRITICAL — applies to EVERY app file change):
