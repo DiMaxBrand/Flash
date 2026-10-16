@@ -256,11 +256,9 @@ class WorkbenchViewModel(
                 val localIp = transferRepository.getLocalIp(context)
 
                 if (currentPort != 0) {
-                    // Server already running — add files without restarting
                     uris.forEach { uri -> transferRepository.addFileToServing(currentToken, uri) }
                     publishHandshakes(localIp)
                 } else {
-                    // No server yet — start fresh
                     currentToken = UUID.randomUUID().toString()
                     currentIp = localIp
                     currentPort = transferRepository.startServing(currentToken, uris, context)
@@ -380,7 +378,7 @@ class WorkbenchViewModel(
 
     fun startGalleryTransitionForReceivingPhotos() {
         viewModelScope.launch {
-            delay(2100L)  // Wait for gallery flight animation to complete
+            delay(2100L)
             onReceivingPhotosReadyForGallery()
         }
     }

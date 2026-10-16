@@ -11,6 +11,7 @@ import com.example.flash.ui.onboarding.OnboardingScreen
 import com.example.flash.ui.settings.SettingsScreen
 import com.example.flash.ui.theme.ThemeRepository
 import com.example.flash.ui.workbench.WorkbenchScreen
+import com.example.flash.handshake.CameraHandshakeManager
 
 sealed class Screen(val route: String) {
     object Onboarding : Screen("onboarding")
@@ -41,6 +42,7 @@ fun NavGraph(
         }
 
         composable(Screen.Main.route) {
+            val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as com.example.flash.FlashApplication
             WorkbenchScreen(
                 transferRepository = transferRepository,
                 nfcManager = nfcManager,

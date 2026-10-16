@@ -28,7 +28,6 @@ class TransferRepository(
     private val client: FileClient,
     private val scope: CoroutineScope
 ) {
-
     private val _transferState = MutableStateFlow<TransferState>(TransferState.Idle)
     val transferState: StateFlow<TransferState> = _transferState.asStateFlow()
 
@@ -40,6 +39,7 @@ class TransferRepository(
 
     private var downloadJob: Job? = null
 
+    private var downloadJob: Job? = null
     val servingFileCount: Int get() = server.fileCount
 
     suspend fun startServing(token: String, uris: List<Uri>, context: Context): Int {
@@ -49,9 +49,7 @@ class TransferRepository(
         return port
     }
 
-    fun addFileToServing(token: String, uri: Uri) {
-        server.addUri(token, uri)
-    }
+    fun addFileToServing(token: String, uri: Uri) = server.addUri(token, uri)
 
     fun startDownload(ip: String, port: Int, token: String, fileCount: Int, context: Context) {
         downloadJob?.cancel()
@@ -59,7 +57,6 @@ class TransferRepository(
             try {
                 _progressFlow.value = 0f
                 _transferState.value = TransferState.Downloading(0f)
-
                 val destDir = File(context.cacheDir, "transfers")
                 val files = client.downloadAll(
                     ip, port, token, fileCount, destDir,
@@ -95,9 +92,7 @@ class TransferRepository(
         _progressFlow.value = 0f
     }
 
-    fun reset() {
-        stopAll()
-    }
+    fun reset() = stopAll()
 
     fun getLocalIp(context: Context): String {
         return try {
@@ -105,8 +100,6 @@ class TransferRepository(
             @Suppress("DEPRECATION")
             val ip = wifiManager.connectionInfo.ipAddress
             "${ip and 0xff}.${ip shr 8 and 0xff}.${ip shr 16 and 0xff}.${ip shr 24 and 0xff}"
-        } catch (_: Exception) {
-            "127.0.0.1"
-        }
+        } catch (_: Exception) { "127.0.0.1" }
     }
 }

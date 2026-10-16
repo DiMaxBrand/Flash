@@ -137,7 +137,6 @@ fun MotherCore(
             buildBlobPath(blobCx, blobCx, baseRPx, noiseRPx, time.toDouble())
         }
 
-        // ── Lens distortion layer: refracts photos behind the blob ───────────
         if (backdrop != null) {
             val blobDiameterDp = with(density) { ((baseRPx + noiseRPx) * 2).toDp() }
             Box(
@@ -152,9 +151,7 @@ fun MotherCore(
                             blur(3f.dp.toPx())
                             lens(16f.dp.toPx(), 32f.dp.toPx())
                         },
-                        onDrawSurface = {
-                            drawRect(AquaGlow)
-                        }
+                        onDrawSurface = { drawRect(AquaGlow) }
                     )
             )
         }
@@ -176,20 +173,17 @@ fun MotherCore(
             )
         }
 
-        // Animated specular wobble — the highlight drifts slowly across the surface
         val specularShiftX = (sin(time * 0.00063 * PI) * baseRPx * 0.12f).toFloat()
         val specularShiftY = (cos(time * 0.00047 * PI) * baseRPx * 0.09f).toFloat()
 
         Canvas(modifier = Modifier.fillMaxSize()) {
-            // ── Blob fill: radial gradient for 3D depth ───────────────────────
-            val lightAqua = Color(0xFF80FFFF)   // top-left highlight
-            val darkTeal  = Color(0xFF003C3C)   // bottom-right shadow
-
+            val lightAqua = Color(0xFF80FFFF)
+            val darkTeal  = Color(0xFF003C3C)
             val blobFill = Brush.radialGradient(
                 colorStops = arrayOf(
-                    0.0f to lightAqua.copy(alpha = 0.95f),
+                    0.0f  to lightAqua.copy(alpha = 0.95f),
                     0.45f to OceanAqua,
-                    1.0f to darkTeal
+                    1.0f  to darkTeal
                 ),
                 center = Offset(center.x - baseRPx * 0.28f, center.y - baseRPx * 0.35f),
                 radius = baseRPx * 2.2f
@@ -203,7 +197,6 @@ fun MotherCore(
                     addOval(androidx.compose.ui.geometry.Rect(center, hollowR))
                 }
                 drawPath(coreWithHole, brush = blobFill)
-
                 if (crystallizedBitmap != null && hollowProgress > 0.2f) {
                     val hollowPath = Path().apply { addOval(androidx.compose.ui.geometry.Rect(center, hollowR)) }
                     clipPath(hollowPath) {
@@ -229,41 +222,24 @@ fun MotherCore(
                     center = Offset(center.x + baseRPx * 0.55f, center.y + baseRPx * 0.5f)
                 )
 
-                // ── Primary specular: large soft highlight (top-left), animated ─
-                val spec1Center = Offset(
-                    center.x - baseRPx * 0.3f + specularShiftX,
-                    center.y - baseRPx * 0.42f + specularShiftY
-                )
+                val spec1Center = Offset(center.x - baseRPx * 0.3f + specularShiftX, center.y - baseRPx * 0.42f + specularShiftY)
                 drawCircle(
                     brush = Brush.radialGradient(
-                        colors = listOf(
-                            Color.White.copy(alpha = 0.55f),
-                            Color.White.copy(alpha = 0.18f),
-                            Color.Transparent
-                        ),
-                        center = spec1Center,
-                        radius = baseRPx * 0.82f
+                        colors = listOf(Color.White.copy(alpha = 0.55f), Color.White.copy(alpha = 0.18f), Color.Transparent),
+                        center = spec1Center, radius = baseRPx * 0.82f
                     ),
-                    radius = baseRPx * 0.82f,
-                    center = spec1Center
+                    radius = baseRPx * 0.82f, center = spec1Center
                 )
 
-                // ── Secondary specular: small sharp pinpoint ──────────────────
-                val spec2Center = Offset(
-                    center.x - baseRPx * 0.18f + specularShiftX * 0.6f,
-                    center.y - baseRPx * 0.32f + specularShiftY * 0.6f
-                )
+                val spec2Center = Offset(center.x - baseRPx * 0.18f + specularShiftX * 0.6f, center.y - baseRPx * 0.32f + specularShiftY * 0.6f)
                 drawCircle(
                     brush = Brush.radialGradient(
                         colors = listOf(Color.White.copy(0.92f), Color.Transparent),
-                        center = spec2Center,
-                        radius = baseRPx * 0.22f
+                        center = spec2Center, radius = baseRPx * 0.22f
                     ),
-                    radius = baseRPx * 0.22f,
-                    center = spec2Center
+                    radius = baseRPx * 0.22f, center = spec2Center
                 )
 
-                // ── Depth shadow: subtle dark gradient at the bottom ──────────
                 drawRect(
                     brush = Brush.verticalGradient(
                         colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.18f)),
@@ -273,12 +249,8 @@ fun MotherCore(
                 )
             }
 
-            // ── Glassy rim outline: thin bright ring around the edge ─────────
-            drawPath(
-                path  = blobPath,
-                color = Color.White.copy(alpha = 0.22f),
-                style = Stroke(width = 1.5f.dp.toPx(), cap = StrokeCap.Round)
-            )
+            drawPath(path = blobPath, color = Color.White.copy(alpha = 0.22f),
+                style = Stroke(width = 1.5f.dp.toPx(), cap = StrokeCap.Round))
         }
     }
 }
@@ -287,7 +259,6 @@ internal fun updateBlobPath(path: Path, cx: Float, cy: Float, baseR: Float, nois
     path.reset()
     val n    = CONTROL_POINTS
     val step = 2 * PI / n
-
     val radii = FloatArray(n) { i ->
         val angle = i * step
         val noise = PerlinNoise.octaveNoise(
@@ -297,25 +268,19 @@ internal fun updateBlobPath(path: Path, cx: Float, cy: Float, baseR: Float, nois
         ).toFloat()
         baseR + noise * noiseAmp
     }
-
     fun getX(i: Int) = cx + radii[(i + n) % n] * cos((i % n) * step).toFloat()
     fun getY(i: Int) = cy + radii[(i + n) % n] * sin((i % n) * step).toFloat()
-
     path.moveTo(getX(0), getY(0))
     for (i in 0 until n) {
-        val p1x = getX(i)
-        val p1y = getY(i)
-        val p2x = getX(i + 1)
-        val p2y = getY(i + 1)
-        val p0x = getX(i - 1)
-        val p0y = getY(i - 1)
-        val p3x = getX(i + 2)
-        val p3y = getY(i + 2)
-        val cp1x = p1x + (p2x - p0x) / 6f
-        val cp1y = p1y + (p2y - p0y) / 6f
-        val cp2x = p2x - (p3x - p1x) / 6f
-        val cp2y = p2y - (p3y - p1y) / 6f
-        path.cubicTo(cp1x, cp1y, cp2x, cp2y, p2x, p2y)
+        val p1x = getX(i);   val p1y = getY(i)
+        val p2x = getX(i+1); val p2y = getY(i+1)
+        val p0x = getX(i-1); val p0y = getY(i-1)
+        val p3x = getX(i+2); val p3y = getY(i+2)
+        path.cubicTo(
+            p1x + (p2x - p0x) / 6f, p1y + (p2y - p0y) / 6f,
+            p2x - (p3x - p1x) / 6f, p2y - (p3y - p1y) / 6f,
+            p2x, p2y
+        )
     }
     path.close()
 }

@@ -57,11 +57,8 @@ kotlin {
 }
 
 dependencies {
-    // Core
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
-
-    // Compose BOM
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.ui.graphics)
@@ -70,42 +67,22 @@ dependencies {
     implementation(libs.compose.ui.tooling.preview)
     implementation(libs.compose.material.icons)
     debugImplementation(libs.compose.ui.tooling)
-
-    // Material3 (pinned alpha — outside BOM)
     implementation(libs.compose.material3)
-
-    // Navigation
     implementation(libs.navigation.compose)
     implementation(libs.activity.compose)
-
-    // Lifecycle / ViewModel
     implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.lifecycle.runtime.compose)
-
-    // Ktor server
     implementation(libs.ktor.server.cio)
     implementation(libs.ktor.server.core)
-
-    // Ktor client
     implementation(libs.ktor.client.cio)
     implementation(libs.ktor.client.core)
     implementation(libs.ktor.serialization.json)
-
-    // Images
     implementation(libs.coil.compose)
-
-    // Persistence
     implementation(libs.datastore.preferences)
-
-    // Logging
     implementation(libs.slf4jApi)
     implementation(libs.logbackAndroid)
-
-    // Liquid Glass
     implementation(libs.backdrop)
     implementation(libs.kyant.shapes)
-
-    // Coroutines
     implementation(libs.kotlinx.coroutines.android)
 
     // Camera

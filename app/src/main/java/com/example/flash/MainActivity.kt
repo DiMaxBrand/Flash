@@ -3,6 +3,7 @@ package com.example.flash
 import android.app.PendingIntent
 import android.content.Intent
 import android.content.IntentFilter
+import android.nfc.NfcAdapter
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -53,7 +54,17 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // We'll manage NFC modes dynamically based on UI state now.
+        val pendingIntent = PendingIntent.getActivity(
+            this, 0,
+            Intent(this, this::class.java).apply { addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP) },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+        )
+        val filters = arrayOf(
+            IntentFilter(NfcAdapter.ACTION_NDEF_DISCOVERED),
+            IntentFilter(NfcAdapter.ACTION_TECH_DISCOVERED),
+            IntentFilter(NfcAdapter.ACTION_TAG_DISCOVERED)
+        )
+        nfcManager.enableForegroundDispatch(this, pendingIntent, filters)
     }
 
     override fun onPause() {
