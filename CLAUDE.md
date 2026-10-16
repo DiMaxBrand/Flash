@@ -297,7 +297,7 @@ Commit message: "feat: update MotherCore animations (versionCode 17, May 12)"
 **Files**: `CameraHandshakeManager.kt`, `ColorDetectionScreen.kt`, `ScanCompletePopup.kt`
 
 ### Why It Exists
-On HyperOS 3+ devices (certain Xiaomi phones), NFC reader mode doesn't work reliably. The camera handshake provides a visual fallback: two devices point their front cameras at each other's MotherCore blob, which pulses a specific color. The receiving device analyzes YUV frames to detect and match that color, confirming the peer and establishing a connection.
+On HyperOS 3+ devices (certain Xiaomi phones), NFC reader mode doesn't work reliably. The camera handshake provides a visual fallback: the receiver points its back camera at the sender's MotherCore blob, which is tinted with a specific color. The receiving device analyzes YUV frames to detect and match that color, confirming the peer and establishing a connection.
 
 ### Architecture
 
@@ -324,7 +324,7 @@ fun updateFrame(yuv: ByteArray) {
     // 3. Sustained match ≥ 1000ms (no flickering false positives)
 }
 ```
-- Receiver runs front camera in background
+- Receiver runs the back camera only after a sender is discovered over mDNS (state `Detecting`); the live preview shows through the MotherCore shape
 - Continuously analyzes YUV frames for dominant color
 - Only locks when all 3 conditions sustained for 1 second
 
@@ -344,6 +344,13 @@ fun updateFrame(yuv: ByteArray) {
 - **Fallback only**: Only used on HyperOS devices (checked via `DeviceDetector.isHyperOSDevice()`)
 - **UI non-blocking**: Analysis runs on background thread, doesn't freeze Compose
 - **Deterministic colors**: HSV palette ensures distinct, visually separable hues
+
+### Pairing Mode Setting
+Settings has a **Pairing method** row (`HandshakeMode`: AUTO / NFC / CAMERA, stored in `ThemeRepository`).
+- AUTO: NFC always; camera also on HyperOS (`DeviceDetector.isHyperOSDevice()`)
+- NFC: camera discovery/advertising off
+- CAMERA: NFC foreground dispatch and outbound NFC handshake off
+- `WorkbenchViewModel.applyHandshakeMode(nfc, camera)` applies it; the sender tints its own MotherCore with its advertised `displayColor` so the receiver's camera has something to find.
 
 ## Network Corruption Detection & Recovery
 
