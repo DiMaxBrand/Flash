@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.draw.clip
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -62,9 +63,10 @@ fun MotherCore(
     cutoutOffset: Offset = Offset.Zero,
     backdrop: Backdrop? = null,
     accentColor: Color? = null,
-    viewfinderActive: Boolean = false,
+    viewfinderContent: (@Composable () -> Unit)? = null,
     onAnimationComplete: () -> Unit = {}
 ) {
+    val viewfinderActive = viewfinderContent != null
     val isDark = isSystemInDarkTheme()
     val density = androidx.compose.ui.platform.LocalDensity.current
 
@@ -136,6 +138,24 @@ fun MotherCore(
 
         val blobPath = remember(time, baseRPx, noiseRPx, blobCx) {
             buildBlobPath(blobCx, blobCx, baseRPx, noiseRPx, time.toDouble())
+        }
+
+        // ── Live camera, clipped to the morphing blob itself (no static circle) ──
+        if (viewfinderContent != null) {
+            val blobShape = remember(blobPath) {
+                object : androidx.compose.ui.graphics.Shape {
+                    override fun createOutline(
+                        size: androidx.compose.ui.geometry.Size,
+                        layoutDirection: androidx.compose.ui.unit.LayoutDirection,
+                        density: androidx.compose.ui.unit.Density
+                    ) = androidx.compose.ui.graphics.Outline.Generic(blobPath)
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(blobShape)
+            ) { viewfinderContent() }
         }
 
         // ── Lens distortion layer: refracts photos behind the blob ───────────

@@ -8,6 +8,7 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -157,15 +158,14 @@ fun MotherCoreViewfinder(
         }
     }
 
-    Box(
-        modifier = modifier
-            .size(160.dp)  // Matches MotherCore's BASE_RADIUS_DP * 2 + padding
-            .clip(CircleShape)
-    ) {
+    // Fills whatever clips it; MotherCore clips this to its morphing blob shape.
+    Box(modifier = modifier.fillMaxSize()) {
         if (cameraProvider != null) {
             AndroidView(
                 factory = { ctx ->
                     PreviewView(ctx).apply {
+                        // TextureView-backed so the blob clip applies (SurfaceView ignores it)
+                        implementationMode = PreviewView.ImplementationMode.COMPATIBLE
                         val preview = Preview.Builder().build()
                         var colorMatcher: ColorMatcher? = null
                         var matcherColor: Int? = null

@@ -562,13 +562,15 @@ fun WorkbenchScreen(
             val viewfinderActive = cameraGranted && uiState.cameraHandshakeEnabled &&
                 uiState.selectedPhotos.isEmpty() && !uiState.isReceiving &&
                 uiState.colorDetectionState != ColorDetectionState.Locked
-            if (viewfinderActive) {
-                MotherCoreViewfinder(
-                    targetColor = uiState.detectedPeerColor?.displayColor,
-                    onMatchStrengthChanged = { viewModel.onDetectionStrengthChanged(it) },
-                    onColorLocked = { viewModel.onColorLocked() }
-                )
-            }
+            val viewfinderContent: (@Composable () -> Unit)? = if (viewfinderActive) {
+                {
+                    MotherCoreViewfinder(
+                        targetColor = uiState.detectedPeerColor?.displayColor,
+                        onMatchStrengthChanged = { viewModel.onDetectionStrengthChanged(it) },
+                        onColorLocked = { viewModel.onColorLocked() }
+                    )
+                }
+            } else null
 
             // Receiver: tint to the peer's color once locked.
             // Sender: show our own advertised color so the other phone's camera can find it.
@@ -587,7 +589,7 @@ fun WorkbenchScreen(
                 cutoutOffset = cutoutOffset,
                 backdrop     = backdrop,
                 accentColor  = lockedAccent,
-                viewfinderActive = viewfinderActive,
+                viewfinderContent = viewfinderContent,
                 onAnimationComplete = {
                     val activity = context as? android.app.Activity
                     @Suppress("DEPRECATION") activity?.overridePendingTransition(0, 0)

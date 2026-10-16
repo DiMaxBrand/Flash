@@ -323,7 +323,7 @@ fun updateFrame(yuv: ByteArray) {
     // 3. Sustained match ≥ 1000ms (no flickering false positives)
 }
 ```
-- In camera mode a receiver (no photos selected, not mid-transfer) shows the live back-camera preview immediately; color matching starts once a sender is discovered over mDNS (state `Detecting`). `MotherCore(viewfinderActive = true)` skips its opaque lens layer and glow so the preview is visible through the blob
+- In camera mode a receiver (no photos selected, not mid-transfer) shows the live back-camera preview immediately; color matching starts once a sender is discovered over mDNS (state `Detecting`). `MotherCore(viewfinderContent = { MotherCoreViewfinder(...) })` clips the live preview to the morphing blob path itself (no static circle; `PreviewView` uses COMPATIBLE/TextureView mode so the clip applies) and skips its opaque lens layer and glow
 - Continuously analyzes YUV frames for dominant color
 - Only locks when all 3 conditions sustained for 1 second
 
