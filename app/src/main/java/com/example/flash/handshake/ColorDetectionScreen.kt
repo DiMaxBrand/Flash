@@ -15,6 +15,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -118,7 +119,7 @@ class ColorMatcher(private val targetColor: Int) {
  */
 @Composable
 fun MotherCoreViewfinder(
-    targetColor: Int,
+    targetColor: Int?,
     onMatchStrengthChanged: (Float) -> Unit,
     onColorLocked: () -> Unit,
     modifier: Modifier = Modifier
@@ -127,6 +128,9 @@ fun MotherCoreViewfinder(
     val lifecycleOwner = LocalLifecycleOwner.current
     var cameraProvider by remember { mutableStateOf<ProcessCameraProvider?>(null) }
     val executor = remember { Executors.newSingleThreadExecutor() }
+    // The preview runs as soon as the viewfinder is shown; color matching only starts
+    // once a sender (and therefore a target color) is known.
+    val currentTarget by rememberUpdatedState(targetColor)
 
     LaunchedEffect(Unit) {
         ProcessCameraProvider.getInstance(context).addListener({
@@ -151,7 +155,8 @@ fun MotherCoreViewfinder(
                 factory = { ctx ->
                     PreviewView(ctx).apply {
                         val preview = Preview.Builder().build()
-                        val colorMatcher = ColorMatcher(targetColor)
+                        var colorMatcher: ColorMatcher? = null
+                        var matcherColor: Int? = null
                         var locked = false
 
                         val imageAnalysis = ImageAnalysis.Builder()
@@ -161,6 +166,17 @@ fun MotherCoreViewfinder(
                             .apply {
                                 setAnalyzer(executor) { imageProxy ->
                                     try {
+                                        val target = currentTarget
+                                        if (target == null) {
+                                            colorMatcher = null
+                                            matcherColor = null
+                                            return@setAnalyzer
+                                        }
+                                        if (matcherColor != target) {
+                                            colorMatcher = ColorMatcher(target)
+                                            matcherColor = target
+                                        }
+                                        val matcher = colorMatcher ?: return@setAnalyzer
                                         val planes = imageProxy.planes
                                         val yPlane = planes[0]
                                         val uPlane = planes[1]
@@ -174,14 +190,14 @@ fun MotherCoreViewfinder(
                                         val uData = ByteArray(uBuf.remaining()).also { uBuf.get(it) }
                                         val vData = ByteArray(vBuf.remaining()).also { vBuf.get(it) }
 
-                                        val confirmed = colorMatcher.analyzeFrame(
+                                        val confirmed = matcher.analyzeFrame(
                                             yData, uData, vData,
                                             imageProxy.width, imageProxy.height,
                                             yPlane.rowStride, uPlane.rowStride, uPlane.pixelStride
                                         )
 
                                         ContextCompat.getMainExecutor(ctx).execute {
-                                            onMatchStrengthChanged(colorMatcher.lastMatchStrength)
+                                            onMatchStrengthChanged(matcher.lastMatchStrength)
                                             if (confirmed && !locked) {
                                                 locked = true
                                                 onColorLocked()

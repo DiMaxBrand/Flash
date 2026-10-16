@@ -324,7 +324,7 @@ fun updateFrame(yuv: ByteArray) {
     // 3. Sustained match ≥ 1000ms (no flickering false positives)
 }
 ```
-- Receiver runs the back camera only after a sender is discovered over mDNS (state `Detecting`); the live preview shows through the MotherCore shape
+- In camera mode a receiver (no photos selected, not mid-transfer) shows the live back-camera preview immediately; color matching starts once a sender is discovered over mDNS (state `Detecting`). `MotherCore(viewfinderActive = true)` skips its opaque lens layer and glow so the preview is visible through the blob
 - Continuously analyzes YUV frames for dominant color
 - Only locks when all 3 conditions sustained for 1 second
 
@@ -340,7 +340,7 @@ fun updateFrame(yuv: ByteArray) {
 - Connection confirmed via `onColorConfirmed()` → calls `startDownload()`
 
 ### Design Notes
-- **Camera permission** required (handled by launch chain)
+- **Camera permission** is requested by `WorkbenchScreen` as soon as camera pairing is active (`cameraOn`); the viewfinder only shows once it is granted
 - **Fallback only**: Only used on HyperOS devices (checked via `DeviceDetector.isHyperOSDevice()`)
 - **UI non-blocking**: Analysis runs on background thread, doesn't freeze Compose
 - **Deterministic colors**: HSV palette ensures distinct, visually separable hues

@@ -62,6 +62,7 @@ fun MotherCore(
     cutoutOffset: Offset = Offset.Zero,
     backdrop: Backdrop? = null,
     accentColor: Color? = null,
+    viewfinderActive: Boolean = false,
     onAnimationComplete: () -> Unit = {}
 ) {
     val isDark = isSystemInDarkTheme()
@@ -138,7 +139,9 @@ fun MotherCore(
         }
 
         // ── Lens distortion layer: refracts photos behind the blob ───────────
-        if (backdrop != null) {
+        // Skipped while the camera viewfinder sits behind the core: the lens layer is
+        // opaque and would hide the live preview.
+        if (backdrop != null && !viewfinderActive) {
             val blobDiameterDp = with(density) { ((baseRPx + noiseRPx) * 2).toDp() }
             Box(
                 modifier = Modifier
@@ -161,7 +164,7 @@ fun MotherCore(
 
         Canvas(modifier = Modifier.fillMaxSize()) {
             val glowRadius = baseRPx * 1.5f
-            drawCircle(
+            if (!viewfinderActive) drawCircle(
                 brush = Brush.radialGradient(
                     colors = if (isDark) {
                         listOf(AquaPulse.copy(alpha = 0.6f), AquaPulse.copy(alpha = 0.2f), Color.Transparent)

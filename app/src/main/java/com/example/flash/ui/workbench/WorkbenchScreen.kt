@@ -164,6 +164,23 @@ fun WorkbenchScreen(
         viewModel.applyHandshakeMode(nfc = nfcOn, camera = cameraOn)
     }
 
+    // ── Camera permission: asked up front as soon as camera pairing is active ─
+    var cameraGranted by remember {
+        mutableStateOf(
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context, android.Manifest.permission.CAMERA
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        )
+    }
+    val cameraPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { granted -> cameraGranted = granted }
+    LaunchedEffect(cameraOn) {
+        if (cameraOn && !cameraGranted) {
+            cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
+        }
+    }
+
     // ── Initialize camera handshake on first load ───────────────────────────
     LaunchedEffect(Unit) {
         viewModel.initializeCameraHandshake()
@@ -538,17 +555,18 @@ fun WorkbenchScreen(
                 },
             contentAlignment = Alignment.Center
         ) {
-            // ── Camera viewfinder rendered behind MotherCore when detecting ────
-            if (uiState.colorDetectionState == ColorDetectionState.Detecting ||
-                uiState.colorDetectionState == ColorDetectionState.Locked) {
-                val peerColor = uiState.detectedPeerColor
-                if (peerColor != null) {
-                    MotherCoreViewfinder(
-                        targetColor = peerColor.displayColor,
-                        onMatchStrengthChanged = { viewModel.onDetectionStrengthChanged(it) },
-                        onColorLocked = { viewModel.onColorLocked() }
-                    )
-                }
+            // ── Live camera viewfinder behind MotherCore ───────────────────────
+            // Shown whenever this phone is a camera-mode receiver (no photos selected,
+            // not mid-transfer). The preview starts immediately; color matching starts
+            // once a sender has been discovered and its color is known.
+            val viewfinderActive = cameraGranted && uiState.cameraHandshakeEnabled &&
+                uiState.selectedPhotos.isEmpty() && !uiState.isReceiving
+            if (viewfinderActive) {
+                MotherCoreViewfinder(
+                    targetColor = uiState.detectedPeerColor?.displayColor,
+                    onMatchStrengthChanged = { viewModel.onDetectionStrengthChanged(it) },
+                    onColorLocked = { viewModel.onColorLocked() }
+                )
             }
 
             // Receiver: tint to the peer's color once locked.
@@ -568,6 +586,7 @@ fun WorkbenchScreen(
                 cutoutOffset = cutoutOffset,
                 backdrop     = backdrop,
                 accentColor  = lockedAccent,
+                viewfinderActive = viewfinderActive,
                 onAnimationComplete = {
                     val activity = context as? android.app.Activity
                     @Suppress("DEPRECATION") activity?.overridePendingTransition(0, 0)
@@ -576,9 +595,10 @@ fun WorkbenchScreen(
             )
 
             // ── Detecting hint label ─────────────────────────────────────────
-            if (uiState.colorDetectionState == ColorDetectionState.Detecting) {
+            if (viewfinderActive && uiState.colorDetectionState != ColorDetectionState.Locked) {
                 androidx.compose.material3.Text(
-                    text = "Point at their MotherCore",
+                    text = if (uiState.colorDetectionState == ColorDetectionState.Detecting)
+                        "Point at their MotherCore" else "Looking for a nearby sender…",
                     color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.6f),
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier
