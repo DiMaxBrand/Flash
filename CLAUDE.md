@@ -43,7 +43,10 @@ Verify build succeeds: `./gradlew clean assembleDebug`
 The **only** branches you should use are:
 1. **`claude-code`** — Your feature/development branch (long-lived)
 2. **`develop`** — Integration branch where features merge after testing
-3. **`main`** — Production branch (protected; direct pushes prohibited)
+3. **`main`** — Release branch. Every push to `main` builds the APK in CI and publishes a GitHub release (`.github/workflows/build.yml`); that release is how changes reach the user's phone.
+
+### Delivery (standing authorization from the user)
+The user develops without a computer and installs APKs from GitHub releases. They have **explicitly and permanently authorized pushing directly to `main`** (and resetting `develop` to match it) whenever work is built and ready, so releases happen without asking each time. Always compile first (`./gradlew assembleDebug`); in the sandbox use a Maven Central mirror via a `~/.gradle/init.d` script if repo.maven.apache.org rate-limits (429/404), and install the Android SDK (platform 36, build-tools 34) if missing. If an auto-mode permission check still blocks the push, stop and tell the user rather than working around it.
 
 **Important**: Do NOT create temporary feature branches like `claude/resume-after-network-issues`. All work goes on `claude-code`.
 
