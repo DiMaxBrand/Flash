@@ -106,7 +106,8 @@ class CameraHandshakeManager(private val context: Context) {
                     // NSD often resolves to an IPv6 link-local address that the HTTP client
                     // cannot use, so the sender advertises its IPv4 explicitly.
                     val advertisedIp = resolved.attributes["ip"]?.let { String(it, Charsets.UTF_8) }
-                    val hostAddress = advertisedIp?.takeIf { it.isNotBlank() }
+                    val hostAddress = advertisedIp
+                        ?.takeIf { it.isNotBlank() && it != "0.0.0.0" && !it.startsWith("127.") }
                         ?: resolved.host?.hostAddress?.substringBefore('%')
                         ?: return@let
                     val port = resolved.port

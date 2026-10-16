@@ -1,7 +1,12 @@
 package com.example.flash.transfer
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
+import android.net.wifi.WifiManager
+import java.net.Inet4Address
+import java.net.NetworkInterface
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -99,14 +104,50 @@ class TransferRepository(
         stopAll()
     }
 
+    /**
+     * This phone's IPv4 address on the local network, or "127.0.0.1" if none is found.
+     * `WifiManager.connectionInfo.ipAddress` is deprecated (API 31) and wrong when this
+     * phone is the hotspot host, so it is only the last resort.
+     */
     fun getLocalIp(context: Context): String {
+        // 1. The active network, when it is Wi-Fi
+        runCatching {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val network = cm.activeNetwork
+            val isWifi = network != null &&
+                cm.getNetworkCapabilities(network)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+            if (isWifi) {
+                cm.getLinkProperties(network)?.linkAddresses
+                    ?.map { it.address }
+                    ?.filterIsInstance<Inet4Address>()
+                    ?.firstOrNull { !it.isLoopbackAddress }
+                    ?.hostAddress
+                    ?.let { return it }
+            }
+        }
+        // 2. Wi-Fi / hotspot / Wi-Fi Direct interfaces (also covers hosting a hotspot)
+        runCatching {
+            NetworkInterface.getNetworkInterfaces().toList()
+                .filter { it.isUp && !it.isLoopback && WIFI_IF.matches(it.name) }
+                .flatMap { it.inetAddresses.toList() }
+                .filterIsInstance<Inet4Address>()
+                .firstOrNull { it.isSiteLocalAddress }
+                ?.hostAddress
+                ?.let { return it }
+        }
+        // 3. Legacy fallback
         return try {
-            val wifiManager = context.getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager
+            val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
             @Suppress("DEPRECATION")
             val ip = wifiManager.connectionInfo.ipAddress
-            "${ip and 0xff}.${ip shr 8 and 0xff}.${ip shr 16 and 0xff}.${ip shr 24 and 0xff}"
+            if (ip == 0) "127.0.0.1"
+            else "${ip and 0xff}.${ip shr 8 and 0xff}.${ip shr 16 and 0xff}.${ip shr 24 and 0xff}"
         } catch (_: Exception) {
             "127.0.0.1"
         }
+    }
+
+    private companion object {
+        val WIFI_IF = Regex("^(wlan|swlan|ap|softap|p2p)[-\\w]*\\d*$")
     }
 }

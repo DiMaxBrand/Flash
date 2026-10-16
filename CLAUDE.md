@@ -313,7 +313,8 @@ fun generateDisplayColor(): Int {
 // HUES = [200, 140, 280, 30, 170, 60, 320, 0] (8 colors covering hue wheel)
 ```
 - Sender generates a random HSV color (high saturation & value for camera visibility)
-- Advertises via mDNS with: peerId, displayColor, ip, port, token, fileCount
+- Advertises via mDNS with: peerId, displayColor, ip, port, token, fileCount. **Known security gap:** the token is in the mDNS TXT record, readable by anyone on the same Wi-Fi; tokens never expire and are not single-use; transfer is plain HTTP.
+- `TransferRepository.getLocalIp()` finds the IPv4 via the active Wi-Fi network's LinkProperties, then Wi-Fi/hotspot interfaces, then the deprecated `WifiManager.connectionInfo` as a last resort. The receiver ignores an advertised `0.0.0.0`/`127.x` and falls back to the NSD-resolved host.
 
 #### 2. Color Detection (YUV Analysis)
 ```kotlin
@@ -361,11 +362,8 @@ Settings has a **Pairing method** row (`HandshakeMode`: AUTO / NFC / CAMERA, sto
 ### SHA-256 Verification
 ```kotlin
 // FileServer.kt
-val checksum = MessageDigest.getInstance("SHA-256").let {
-    it.update(file.readBytes())
-    Base64.getEncoder().encodeToString(it.digest())
-}
-// Sent in X-File-Checksum header
+// Real code streams the file and sends lowercase HEX SHA-256 in the X-File-Checksum header
+val checksum = digest.digest().joinToString("") { "%02x".format(it) }
 ```
 
 ```kotlin
