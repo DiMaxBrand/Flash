@@ -34,8 +34,9 @@ import kotlin.math.abs
  *
  * Three safeguards prevent false positives:
  * 1. Saturation threshold — rejects dull environmental colors (walls, furniture)
- * 2. Fill ratio — requires >35% of center region to match (phone screen dominates viewfinder)
- * 3. Sustained match — 8 consecutive frames must pass before confirmation
+ * 2. Fill ratio — requires >35% of the whole sampled centre area (not just of its saturated
+ *    pixels) to match, so a few warm pixels in a room cannot trigger a lock
+ * 3. Sustained match — held for 1 s (with a short dropout grace) before confirmation
  */
 class ColorMatcher(private val targetColor: Int) {
 
@@ -62,7 +63,7 @@ class ColorMatcher(private val targetColor: Int) {
         val radius = minOf(width, height) / 4
 
         var matchingPixels = 0
-        var highSatPixels = 0
+        var sampledPixels = 0
         val hsv = FloatArray(3)
 
         for (y in maxOf(0, cy - radius)..minOf(height - 1, cy + radius)) {
@@ -71,6 +72,7 @@ class ColorMatcher(private val targetColor: Int) {
                 val uvIdx = (y / 2) * uvRowStride + (x / 2) * uvPixelStride
                 if (yIdx >= yData.size || uvIdx >= uData.size || uvIdx >= vData.size) continue
 
+                sampledPixels++
                 val yv = (yData[yIdx].toInt() and 0xFF) - 16
                 val uv = (uData[uvIdx].toInt() and 0xFF) - 128
                 val vv = (vData[uvIdx].toInt() and 0xFF) - 128
@@ -86,21 +88,20 @@ class ColorMatcher(private val targetColor: Int) {
                 if (hsv[2] < 0.12f) continue
                 // Safeguard 1: ignore low-saturation pixels (walls, shadows, furniture)
                 if (hsv[1] < 0.45f) continue
-                highSatPixels++
 
                 val hueDiff = minOf(abs(hsv[0] - targetHsv[0]), 360f - abs(hsv[0] - targetHsv[0]))
-                if (hueDiff < 35f) matchingPixels++
+                if (hueDiff < 28f) matchingPixels++
             }
         }
 
-        if (highSatPixels < 20) {
-            // Not enough saturated pixels — likely looking at plain environment
+        if (sampledPixels == 0) {
             lastMatchStrength = 0f
             return missedFrame()
         }
 
-        // Safeguard 2: fill ratio — phone screen must dominate the sampled region
-        val fillRatio = matchingPixels.toFloat() / highSatPixels
+        // Safeguard 2: fill ratio — the coloured phone screen must fill a good part of the
+        // whole sampled area (denominator is ALL sampled pixels, not only saturated ones)
+        val fillRatio = matchingPixels.toFloat() / sampledPixels
         lastMatchStrength = fillRatio
 
         val isMatch = fillRatio > 0.35f

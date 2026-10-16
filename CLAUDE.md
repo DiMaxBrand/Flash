@@ -322,8 +322,8 @@ fun generateDisplayColor(): Int {
 fun updateFrame(yuv: ByteArray) {
     // Convert YUV to RGB for dominant color detection
     // Check 3 conditions:
-    // 1. Saturation ≥ 0.50f (no grays/whites)
-    // 2. Fill ratio > 0.35f (meaningful portion of frame)
+    // 1. Saturation ≥ 0.45f, value ≥ 0.12 (no grays/whites/darkness); hue within 28° of the target
+    // 2. Fill ratio > 0.35f of ALL sampled centre pixels (not just the saturated ones)
     // 3. Sustained match ≥ 1000ms (no flickering false positives)
 }
 ```
