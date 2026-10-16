@@ -1,12 +1,9 @@
 package com.example.flash.transfer
 
 import android.content.Context
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import android.net.Uri
 import android.net.wifi.WifiManager
-import java.net.Inet4Address
-import java.net.NetworkInterface
+import com.example.flash.util.LocalNetwork
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -61,6 +58,8 @@ class TransferRepository(
     fun startDownload(ip: String, port: Int, token: String, fileCount: Int, context: Context) {
         downloadJob?.cancel()
         downloadJob = scope.launch {
+            // Go out over Wi-Fi even when a VPN is the default network
+            val boundToWifi = LocalNetwork.bindProcessToWifi(context)
             try {
                 _progressFlow.value = 0f
                 _transferState.value = TransferState.Downloading(0f)
@@ -88,6 +87,8 @@ class TransferRepository(
                 throw e
             } catch (e: Exception) {
                 _transferState.value = TransferState.Failed(e.message ?: "Unknown error")
+            } finally {
+                if (boundToWifi) LocalNetwork.unbind(context)
             }
         }
     }
@@ -106,36 +107,11 @@ class TransferRepository(
 
     /**
      * This phone's IPv4 address on the local network, or "127.0.0.1" if none is found.
-     * `WifiManager.connectionInfo.ipAddress` is deprecated (API 31) and wrong when this
-     * phone is the hotspot host, so it is only the last resort.
+     * Uses the real Wi-Fi network even when a VPN is active (see [LocalNetwork]); the
+     * deprecated `WifiManager.connectionInfo` is only the last resort.
      */
     fun getLocalIp(context: Context): String {
-        // 1. The active network, when it is Wi-Fi
-        runCatching {
-            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-            val network = cm.activeNetwork
-            val isWifi = network != null &&
-                cm.getNetworkCapabilities(network)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
-            if (isWifi) {
-                cm.getLinkProperties(network)?.linkAddresses
-                    ?.map { it.address }
-                    ?.filterIsInstance<Inet4Address>()
-                    ?.firstOrNull { !it.isLoopbackAddress }
-                    ?.hostAddress
-                    ?.let { return it }
-            }
-        }
-        // 2. Wi-Fi / hotspot / Wi-Fi Direct interfaces (also covers hosting a hotspot)
-        runCatching {
-            NetworkInterface.getNetworkInterfaces().toList()
-                .filter { it.isUp && !it.isLoopback && WIFI_IF.matches(it.name) }
-                .flatMap { it.inetAddresses.toList() }
-                .filterIsInstance<Inet4Address>()
-                .firstOrNull { it.isSiteLocalAddress }
-                ?.hostAddress
-                ?.let { return it }
-        }
-        // 3. Legacy fallback
+        LocalNetwork.localIpv4(context)?.let { return it }
         return try {
             val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
             @Suppress("DEPRECATION")
@@ -145,9 +121,5 @@ class TransferRepository(
         } catch (_: Exception) {
             "127.0.0.1"
         }
-    }
-
-    private companion object {
-        val WIFI_IF = Regex("^(wlan|swlan|ap|softap|p2p)[-\\w]*\\d*$")
     }
 }

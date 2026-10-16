@@ -348,6 +348,9 @@ fun updateFrame(yuv: ByteArray) {
 - **UI non-blocking**: Analysis runs on background thread, doesn't freeze Compose
 - **Deterministic colors**: HSV palette ensures distinct, visually separable hues
 
+### VPN handling
+A VPN makes the *tunnel* the default network: `getLocalIp()` used to return its address (e.g. 100.x, unreachable from other phones), mDNS was announced on the tunnel, and connects to 192.168.x.x timed out. `util/LocalNetwork.kt` finds the real Wi-Fi `Network` (TRANSPORT_WIFI and not TRANSPORT_VPN), takes the LAN IPv4 from it (rejecting loopback/link-local/CGNAT 100.64/10), announces/discovers mDNS on that network explicitly (API 31+/33+), and `TransferRepository.startDownload` binds the process to Wi-Fi (`bindProcessToNetwork`) for the download so it bypasses the VPN. An always-on VPN with "block connections without VPN" can still block it. Evidence: user screenshots with the VPN badge on showed advertised IP 100.98.x and `ConnectTimeoutException` to 192.168.1.84.
+
 ### Diagnostics (no computer available)
 Camera mode shows the last 5 mDNS events (`CameraHandshakeManager.status`) in a box at the top of the workbench: advertising registered/failed (with NSD error code), search started/failed, services found/lost, resolve failures (with retry on code 3), and the resolved `ip:port`. A failed download shows a red "Transfer failed: <ExceptionClass: message>" pill and restarts discovery after 4 s (NSD reports a sender only once per search). Resolves are queued one at a time (NSD allows one active resolve). Ask the user to read these lines back when pairing misbehaves.
 

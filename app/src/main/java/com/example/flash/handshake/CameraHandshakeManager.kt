@@ -12,6 +12,8 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import com.example.flash.util.LocalNetwork
+import java.net.Inet4Address
 import java.util.UUID
 
 data class ColorHandshake(
@@ -77,7 +79,12 @@ class CameraHandshakeManager(private val context: Context) {
 
     private fun register(displayColor: Int, ip: String, port: Int, token: String, fileCount: Int, attempt: Int) {
         val manager = nsdManager ?: return
+        val wifi = LocalNetwork.wifiNetwork(context)
         val serviceInfo = NsdServiceInfo().apply {
+            // With a VPN on, the default network is the tunnel; announce on the real Wi-Fi instead
+            if (wifi != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                network = wifi
+            }
             serviceName = "flash-$peerId"
             serviceType = SERVICE_TYPE
             setPort(port)
@@ -134,8 +141,19 @@ class CameraHandshakeManager(private val context: Context) {
             }
         }
         discoveryListener = listener
+        val wifi = LocalNetwork.wifiNetwork(context)
+        log(
+            "Wi-Fi " + (LocalNetwork.localIpv4(context) ?: "none") +
+                if (LocalNetwork.isVpnActive(context)) " (VPN on, using Wi-Fi directly)" else ""
+        )
         try {
-            manager.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, listener)
+            if (wifi != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                manager.discoverServices(
+                    SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, wifi, context.mainExecutor, listener
+                )
+            } else {
+                manager.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, listener)
+            }
         } catch (e: Exception) {
             log("search error: ${e.javaClass.simpleName}")
         }
@@ -175,7 +193,11 @@ class CameraHandshakeManager(private val context: Context) {
         // cannot use, so the sender advertises its IPv4 explicitly.
         val advertisedIp = resolved.attributes["ip"]?.let { String(it, Charsets.UTF_8) }
         val hostAddress = advertisedIp
-            ?.takeIf { it.isNotBlank() && it != "0.0.0.0" && !it.startsWith("127.") }
+            ?.takeIf { ip ->
+                ip.isNotBlank() && runCatching {
+                    (java.net.InetAddress.getByName(ip) as? Inet4Address)?.let { LocalNetwork.isUsableLanIpv4(it) } == true
+                }.getOrDefault(false)
+            }
             ?: resolved.host?.hostAddress?.substringBefore('%')
         if (hostAddress == null) { log("resolved but no usable address"); return }
         val colorStr = resolved.attributes["color"]?.let { String(it, Charsets.UTF_8) }
