@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import com.example.flash.handshake.CameraHandshakeManager
 import com.example.flash.nfc.NfcManager
 import com.example.flash.transfer.TransferRepository
 import com.example.flash.ui.onboarding.OnboardingScreen
@@ -23,7 +24,8 @@ fun NavGraph(
     startDestination: String,
     themeRepository: ThemeRepository,
     transferRepository: TransferRepository,
-    nfcManager: NfcManager
+    nfcManager: NfcManager,
+    cameraHandshakeManager: CameraHandshakeManager
 ) {
     NavHost(navController = navController, startDestination = startDestination) {
 
@@ -42,6 +44,7 @@ fun NavGraph(
             WorkbenchScreen(
                 transferRepository = transferRepository,
                 nfcManager = nfcManager,
+                cameraHandshakeManager = cameraHandshakeManager,
                 onNavigateToSettings = { navController.navigate(Screen.Settings.route) }
             )
         }

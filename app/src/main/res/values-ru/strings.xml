@@ -6,6 +6,10 @@
     <string name="settings_title">Настройки</string>
     <string name="settings_language">Язык</string>
     <string name="settings_theme">Тема</string>
+    <string name="settings_handshake">Способ соединения</string>
+    <string name="handshake_auto">Авто</string>
+    <string name="handshake_nfc">NFC</string>
+    <string name="handshake_camera">Камера</string>
     <string name="theme_light">Светлая</string>
     <string name="theme_dark">Тёмная</string>
     <string name="theme_system">Системная</string>

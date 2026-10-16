@@ -7,7 +7,6 @@ import com.example.flash.transfer.FileClient
 import com.example.flash.transfer.FileServer
 import com.example.flash.transfer.TransferRepository
 import com.example.flash.ui.theme.ThemeRepository
-import com.example.flash.util.DeviceDetector
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -31,12 +30,9 @@ class FlashApplication : Application() {
         )
     }
 
-    val cameraHandshakeManager: CameraHandshakeManager? by lazy {
-        if (DeviceDetector.isHyperOSDevice()) {
-            CameraHandshakeManager(this)
-        } else {
-            null
-        }
+    // Always created; whether it is used is decided by the HandshakeMode setting.
+    val cameraHandshakeManager: CameraHandshakeManager by lazy {
+        CameraHandshakeManager(this)
     }
 
     companion object {

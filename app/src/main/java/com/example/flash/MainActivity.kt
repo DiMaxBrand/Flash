@@ -44,7 +44,8 @@ class MainActivity : ComponentActivity() {
                     startDestination = if (onboardingShown) Screen.Main.route else Screen.Onboarding.route,
                     themeRepository = app.themeRepository,
                     transferRepository = app.transferRepository,
-                    nfcManager = nfcManager
+                    nfcManager = nfcManager,
+                    cameraHandshakeManager = app.cameraHandshakeManager
                 )
             }
         }

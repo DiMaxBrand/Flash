@@ -52,6 +52,7 @@ class CameraHandshakeManager(private val context: Context) {
 
     fun startAdvertising(displayColor: Int, port: Int, token: String, fileCount: Int) {
         if (nsdManager == null) return
+        stopAdvertising()
 
         val serviceInfo = NsdServiceInfo().apply {
             serviceName = "flash-$peerId"
@@ -74,6 +75,7 @@ class CameraHandshakeManager(private val context: Context) {
 
     fun startDiscovery() {
         if (nsdManager == null) return
+        stopDiscovery()
 
         discoveryListener = object : NsdManager.DiscoveryListener {
             override fun onDiscoveryStarted(serviceType: String?) {}
@@ -123,14 +125,14 @@ class CameraHandshakeManager(private val context: Context) {
     }
 
     fun stopAdvertising() {
-        if (nsdManager != null && registrationListener != null) {
-            nsdManager.unregisterService(registrationListener)
-        }
+        val listener = registrationListener ?: return
+        registrationListener = null
+        try { nsdManager?.unregisterService(listener) } catch (_: IllegalArgumentException) { }
     }
 
     fun stopDiscovery() {
-        if (nsdManager != null && discoveryListener != null) {
-            nsdManager.stopServiceDiscovery(discoveryListener)
-        }
+        val listener = discoveryListener ?: return
+        discoveryListener = null
+        try { nsdManager?.stopServiceDiscovery(listener) } catch (_: IllegalArgumentException) { }
     }
 }

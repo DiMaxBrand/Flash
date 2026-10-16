@@ -104,7 +104,9 @@ import com.example.flash.transfer.TransferRepository
 import com.example.flash.ui.core.MotherCore
 import com.example.flash.ui.shader.RippleOverlay
 import com.example.flash.ui.theme.OceanAqua
+import com.example.flash.ui.theme.HandshakeMode
 import com.example.flash.ui.theme.ThemeMode
+import com.example.flash.util.DeviceDetector
 import com.example.flash.ui.theme.ThemeRepository
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
@@ -150,14 +152,26 @@ fun WorkbenchScreen(
     )
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
+    // ── Handshake mode (Settings): which channels pair the two phones ───────
+    // AUTO = NFC always, plus camera on HyperOS. NFC = NFC only. CAMERA = camera only.
+    val handshakeMode by app.themeRepository.handshakeMode
+        .collectAsStateWithLifecycle(HandshakeMode.AUTO)
+    val nfcOn = handshakeMode != HandshakeMode.CAMERA
+    val cameraOn = handshakeMode == HandshakeMode.CAMERA ||
+        (handshakeMode == HandshakeMode.AUTO && DeviceDetector.isHyperOSDevice())
+
+    LaunchedEffect(nfcOn, cameraOn) {
+        viewModel.applyHandshakeMode(nfc = nfcOn, camera = cameraOn)
+    }
+
     // ── Initialize camera handshake on first load ───────────────────────────
     LaunchedEffect(Unit) {
         viewModel.initializeCameraHandshake()
     }
 
     // ── Start discovery when in receiver mode ────────────────────────────────
-    LaunchedEffect(uiState.selectedPhotos.isEmpty()) {
-        if (uiState.selectedPhotos.isEmpty()) {
+    LaunchedEffect(uiState.selectedPhotos.isEmpty(), uiState.cameraHandshakeEnabled) {
+        if (uiState.selectedPhotos.isEmpty() && uiState.cameraHandshakeEnabled) {
             viewModel.startDiscoveringCameraPeers()
         } else {
             viewModel.stopDiscoveringCameraPeers()
@@ -167,8 +181,12 @@ fun WorkbenchScreen(
     // ── NFC Foreground Dispatch (intercepts NFC before system dialog) ────────
     // Enable foreground dispatch ALWAYS when screen is visible, regardless of mode
     // This prevents Android's NFC app selector dialog from interfering with the handshake
-    LaunchedEffect(Unit) {
+    LaunchedEffect(nfcOn) {
         val act = context as? android.app.Activity ?: return@LaunchedEffect
+        if (!nfcOn) {
+            nfcManager.disableForegroundDispatch(act)
+            return@LaunchedEffect
+        }
         val pendingIntent = PendingIntent.getActivity(
             context, 0,
             Intent(context, act::class.java).apply { addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP) },
@@ -533,11 +551,15 @@ fun WorkbenchScreen(
                 }
             }
 
-            val lockedAccent = if (uiState.colorDetectionState == ColorDetectionState.Locked) {
-                uiState.detectedPeerColor?.displayColor?.let {
-                    androidx.compose.ui.graphics.Color(it)
-                }
-            } else null
+            // Receiver: tint to the peer's color once locked.
+            // Sender: show our own advertised color so the other phone's camera can find it.
+            val lockedAccent = when {
+                uiState.colorDetectionState == ColorDetectionState.Locked ->
+                    uiState.detectedPeerColor?.displayColor?.let { androidx.compose.ui.graphics.Color(it) }
+                uiState.cameraHandshakeEnabled && uiState.selectedPhotos.isNotEmpty() ->
+                    uiState.displayColor?.let { androidx.compose.ui.graphics.Color(it) }
+                else -> null
+            }
 
             MotherCore(
                 progress     = uiState.transferProgress,
@@ -634,6 +656,7 @@ private fun SettingsPanel(
 ) {
     val scope     = rememberCoroutineScope()
     val themeMode by themeRepository.themeMode.collectAsStateWithLifecycle(ThemeMode.SYSTEM)
+    val handshakeMode by themeRepository.handshakeMode.collectAsStateWithLifecycle(HandshakeMode.AUTO)
 
     Box(
         modifier = modifier
@@ -713,6 +736,32 @@ private fun SettingsPanel(
                             ThemeMode.LIGHT  -> stringResource(R.string.theme_light)
                             ThemeMode.DARK   -> stringResource(R.string.theme_dark)
                             ThemeMode.SYSTEM -> stringResource(R.string.theme_system)
+                        }
+                    }
+                )
+            }
+
+            HorizontalDivider(color = Color.White.copy(alpha = 0.15f))
+
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text  = stringResource(R.string.settings_handshake),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = Color.White
+                )
+                LiquidSegmentedButtonRow(
+                    items = HandshakeMode.entries,
+                    selectedItem = handshakeMode,
+                    onItemSelected = { scope.launch { themeRepository.setHandshakeMode(it) } },
+                    backdrop = backdrop,
+                    label = { mode ->
+                        when (mode) {
+                            HandshakeMode.AUTO   -> stringResource(R.string.handshake_auto)
+                            HandshakeMode.NFC    -> stringResource(R.string.handshake_nfc)
+                            HandshakeMode.CAMERA -> stringResource(R.string.handshake_camera)
                         }
                     }
                 )

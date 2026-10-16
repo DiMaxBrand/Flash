@@ -54,7 +54,8 @@ data class WorkbenchUiState(
     val displayColor: Int? = null,
     val detectedPeerColor: ColorHandshake? = null,
     val colorDetectionState: ColorDetectionState = ColorDetectionState.Idle,
-    val detectionStrength: Float = 0f
+    val detectionStrength: Float = 0f,
+    val cameraHandshakeEnabled: Boolean = false
 )
 
 class WorkbenchViewModel(
@@ -70,6 +71,8 @@ class WorkbenchViewModel(
     private var currentIp: String = ""
     private var currentPort: Int = 0
     private val cameraHandshakeManager = cameraHandshakeManager
+    private var nfcEnabled = true
+    private var cameraEnabled = false
 
     init {
         nfcManager.peerHandshakeFlow
@@ -196,6 +199,56 @@ class WorkbenchViewModel(
         }
     }
 
+    /** Publishes the sender's handshake over whichever channels the current mode allows. */
+    private fun publishHandshakes(localIp: String) {
+        if (nfcEnabled) {
+            nfcManager.setOutboundHandshake(
+                localIp, currentPort, currentToken, "en",
+                transferRepository.servingFileCount
+            )
+        } else {
+            nfcManager.clearOutboundHandshake()
+        }
+        if (cameraEnabled) {
+            cameraHandshakeManager?.startAdvertising(
+                displayColor = _uiState.value.displayColor ?: 0xFFFF0000.toInt(),
+                port = currentPort,
+                token = currentToken,
+                fileCount = transferRepository.servingFileCount
+            )
+        } else {
+            cameraHandshakeManager?.stopAdvertising()
+        }
+    }
+
+    /**
+     * Applies the user's handshake mode. Safe to call repeatedly; re-publishes the
+     * current handshake if a server is already running.
+     */
+    fun applyHandshakeMode(nfc: Boolean, camera: Boolean) {
+        if (nfc == nfcEnabled && camera == cameraEnabled) return
+        nfcEnabled = nfc
+        cameraEnabled = camera
+        _uiState.update { it.copy(cameraHandshakeEnabled = camera) }
+        if (!camera) {
+            cameraHandshakeManager?.stopDiscovery()
+            _uiState.update {
+                it.copy(
+                    detectedPeerColor = null,
+                    colorDetectionState = ColorDetectionState.Idle,
+                    detectionStrength = 0f
+                )
+            }
+        }
+        if (currentPort != 0) {
+            viewModelScope.launch {
+                try {
+                    publishHandshakes(transferRepository.getLocalIp(com.example.flash.FlashApplication.instance))
+                } catch (_: Exception) { }
+            }
+        }
+    }
+
     private fun addToOrUpdateServer(uris: List<Uri>) {
         viewModelScope.launch {
             try {
@@ -205,31 +258,13 @@ class WorkbenchViewModel(
                 if (currentPort != 0) {
                     // Server already running — add files without restarting
                     uris.forEach { uri -> transferRepository.addFileToServing(currentToken, uri) }
-                    nfcManager.setOutboundHandshake(
-                        localIp, currentPort, currentToken, "en",
-                        transferRepository.servingFileCount
-                    )
-                    cameraHandshakeManager?.startAdvertising(
-                        displayColor = _uiState.value.displayColor ?: 0xFF0000,
-                        port = currentPort,
-                        token = currentToken,
-                        fileCount = transferRepository.servingFileCount
-                    )
+                    publishHandshakes(localIp)
                 } else {
                     // No server yet — start fresh
                     currentToken = UUID.randomUUID().toString()
                     currentIp = localIp
                     currentPort = transferRepository.startServing(currentToken, uris, context)
-                    nfcManager.setOutboundHandshake(
-                        localIp, currentPort, currentToken, "en",
-                        transferRepository.servingFileCount
-                    )
-                    cameraHandshakeManager?.startAdvertising(
-                        displayColor = _uiState.value.displayColor ?: 0xFF0000,
-                        port = currentPort,
-                        token = currentToken,
-                        fileCount = transferRepository.servingFileCount
-                    )
+                    publishHandshakes(localIp)
                     _uiState.update { it.copy(nfcState = NfcUiState.Advertising) }
                 }
             } catch (_: Exception) { }
@@ -247,13 +282,13 @@ class WorkbenchViewModel(
     }
 
     private fun onNfcPeerDetected(handshake: PeerHandshake) {
-        if (_uiState.value.selectedPhotos.isEmpty()) {
+        if (nfcEnabled && _uiState.value.selectedPhotos.isEmpty()) {
             _uiState.update { it.copy(nfcState = NfcUiState.PeerDetected(handshake), isReceiving = true) }
         }
     }
 
     private fun onColorPeerDetected(handshake: ColorHandshake) {
-        if (_uiState.value.selectedPhotos.isEmpty()) {
+        if (cameraEnabled && _uiState.value.selectedPhotos.isEmpty()) {
             _uiState.update {
                 it.copy(
                     detectedPeerColor = handshake,
@@ -367,11 +402,12 @@ class WorkbenchViewModel(
     }
 
     fun initializeCameraHandshake() {
-        val displayColor = cameraHandshakeManager?.generateDisplayColor() ?: 0xFF0000
+        val displayColor = cameraHandshakeManager?.generateDisplayColor() ?: 0xFFFF0000.toInt()
         _uiState.update { it.copy(displayColor = displayColor) }
     }
 
     fun startDiscoveringCameraPeers() {
+        if (!cameraEnabled) return
         cameraHandshakeManager?.startDiscovery()
     }
 
