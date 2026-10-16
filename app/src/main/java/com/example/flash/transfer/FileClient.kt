@@ -172,90 +172,21 @@ class FileClient {
         return isValid
     }
 
-    private suspend fun launchVerification(
-        files: Array<File?>,
-        checksums: Array<String?>,
-        onFileVerified: (index: Int, isValid: Boolean) -> Unit,
-        onCorrupted: (List<String>, List<Int>) -> Unit
-    ) {
-        supervisorScope {
-            launch {
-                delay(500)
-                corruptedFiles.clear()
-                corruptedIndices.clear()
-                verifiedFiles.clear()
-                checksums.forEachIndexed { index, checksum ->
-                    val file = files[index]
-                    if (checksum != null && file != null) {
-                        val isValid = verifyChecksum(file, checksum, index)
-                        verifiedFiles.add(index to isValid)
-                        onFileVerified(index, isValid)
-                    }
-                }
-                if (corruptedFiles.isNotEmpty()) {
-                    corruptedFiles.forEach { fileName ->
-                        files.filterNotNull().find { it.name == fileName }?.delete()
-                    }
-                    onCorrupted(corruptedFiles.toList(), corruptedIndices.toList())
-                }
-            }
-        }
+    private fun extractFileName(disposition: String): String? {
+        return disposition
+            .split(";")
+            .map { it.trim() }
+            .firstOrNull { it.startsWith("filename=") }
+            ?.removePrefix("filename=")
+            ?.trim('"')
     }
-
-    suspend fun download(
-        ip: String, port: Int, token: String, index: Int, destDir: File,
-        onProgress: (Float) -> Unit
-    ): DownloadedFile {
-        destDir.mkdirs()
-        val response: HttpResponse = client.get("http://$ip:$port/transfer/$token/$index")
-        if (!response.status.isSuccess()) throw IOException("Transfer failed: HTTP ${response.status.value}")
-
-        val contentLength = response.headers[HttpHeaders.ContentLength]?.toLongOrNull()
-        val expectedChecksum = response.headers["X-File-Checksum"]
-        val rawDisposition = response.headers[HttpHeaders.ContentDisposition] ?: ""
-        val baseName = sanitizeFileName(extractFileName(rawDisposition)) ?: "received_${System.currentTimeMillis()}"
-        val fileName = "${index}_$baseName"
-        val dest = File(destDir, fileName)
-        require(dest.canonicalPath.startsWith(destDir.canonicalPath + File.separator)) { "Resolved destination escapes destDir" }
-
-        val channel = response.bodyAsChannel()
-        val buffer = ByteArray(8192)
-        var bytesRead = 0L
-        dest.outputStream().use { out ->
-            while (!channel.isClosedForRead) {
-                val count = channel.readAvailable(buffer)
-                if (count > 0) {
-                    out.write(buffer, 0, count)
-                    bytesRead += count
-                    if (contentLength != null && contentLength > 0)
-                        onProgress((bytesRead.toFloat() / contentLength).coerceIn(0f, 1f))
-                }
-            }
-        }
-        onProgress(1f)
-        return DownloadedFile(dest, expectedChecksum)
-    }
-
-    private fun verifyChecksum(file: File, expectedChecksum: String, index: Int): Boolean {
-        val digest = MessageDigest.getInstance("SHA-256")
-        file.inputStream().use { input ->
-            val buffer = ByteArray(8192)
-            var count: Int
-            while (input.read(buffer).also { count = it } > 0) digest.update(buffer, 0, count)
-        }
-        val actual = digest.digest().joinToString("") { "%02x".format(it) }
-        val isValid = actual == expectedChecksum
-        if (!isValid) { corruptedFiles.add(file.name); corruptedIndices.add(index) }
-        return isValid
-    }
-
-    private fun extractFileName(disposition: String): String? =
-        disposition.split(";").map { it.trim() }.firstOrNull { it.startsWith("filename=") }
-            ?.removePrefix("filename=")?.trim('"')
 
     private fun sanitizeFileName(raw: String?): String? {
         if (raw == null) return null
-        val base = raw.substringAfterLast('/').substringAfterLast('\\').trim()
+        val base = raw
+            .substringAfterLast('/')
+            .substringAfterLast('\\')
+            .trim()
         return if (base.isBlank() || base == "." || base == "..") null else base
     }
 

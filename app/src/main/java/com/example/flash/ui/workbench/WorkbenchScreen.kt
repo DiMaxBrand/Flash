@@ -197,6 +197,7 @@ fun WorkbenchScreen(
             IntentFilter(NfcAdapter.ACTION_TECH_DISCOVERED),
             IntentFilter(NfcAdapter.ACTION_TAG_DISCOVERED)
         )
+        // Enable foreground dispatch in both send and receive modes
         nfcManager.enableForegroundDispatch(act, pendingIntent, filters)
     }
 
@@ -241,11 +242,13 @@ fun WorkbenchScreen(
         if (allGranted) viewModel.loadGalleryPhotos(context) else permissionLauncher.launch(needed)
     }
 
+    // ── Zero-click NFC download ──────────────────────────────────────────────
     LaunchedEffect(uiState.nfcState) {
         val s = uiState.nfcState
         if (s is NfcUiState.PeerDetected) viewModel.startDownload(s.handshake, context)
     }
 
+    // ── Camera cutout → blob-local offset ────────────────────────────────────
     val statusBarTopPx = WindowInsets.statusBars.getTop(density).toFloat()
     val blobSizePx     = with(density) { BLOB_SIZE_DP.toPx() }
 
@@ -269,9 +272,10 @@ fun WorkbenchScreen(
     var exitEnabled by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(600L); exitEnabled = true }
 
+    // Auto-trigger gallery transition after receiving photos settle in orbit (~3 seconds)
     LaunchedEffect(uiState.receivingPhotos) {
         if (uiState.receivingPhotos.isNotEmpty() && !shouldStartGalleryTransition) {
-            delay(3000L)
+            delay(3000L)  // Let them orbit for a bit
             shouldStartGalleryTransition = true
             viewModel.startGalleryTransitionForReceivingPhotos()
         }
@@ -289,10 +293,12 @@ fun WorkbenchScreen(
         }
     }
 
+    // Close settings panel on back press
     BackHandler(enabled = showSettings) { showSettings = false }
 
     val photoPicker      = rememberPhotoPicker { uris -> viewModel.onPhotosSelected(uris, context) }
 
+    // ── Single shared backdrop — grid is the capture source for all glass ───
     val backdrop = rememberLayerBackdrop()
 
     val bgAlpha by animateFloatAsState(
@@ -302,6 +308,7 @@ fun WorkbenchScreen(
     )
 
     Box(modifier = Modifier.fillMaxSize()) {
+        // ── Sliding content (everything except MotherCore) ───────────────────
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -311,6 +318,7 @@ fun WorkbenchScreen(
                 )
                 .systemBarsPadding()
         ) {
+        // ── Full-screen photo grid — source for all glass effects ────────────
         LazyVerticalGrid(
             columns = GridCells.Fixed(3),
             contentPadding = PaddingValues(8.dp),
@@ -332,6 +340,7 @@ fun WorkbenchScreen(
             }
         }
 
+        // ── Orbiting selected photos & received photos ─────────────────────────
         PhotoOrbit(
             photos           = uiState.selectedPhotos.toList(),
             coreCenter       = coreCenter,
@@ -341,15 +350,17 @@ fun WorkbenchScreen(
             corruptedIndices = uiState.corruptedIndicesInOrbit
         )
 
+        // ── Received photos materializing into orbit ─────────────────────────
         uiState.receivingPhotos.forEachIndexed { index, uri ->
             ReceivedPhotoMaterializeFlyer(
                 uri = uri,
                 coreCenter = coreCenter,
                 phaseOffset = index * (2f * kotlin.math.PI.toFloat() / uiState.receivingPhotos.size)
-                    + (uiState.selectedPhotos.size * GOLDEN_ANGLE)
+                    + (uiState.selectedPhotos.size * GOLDEN_ANGLE)  // offset by existing photos
             )
         }
 
+        // ── Received photos flying from orbit into gallery ────────────────────
         if (uiState.receivingPhotos.isNotEmpty() && shouldStartGalleryTransition) {
             uiState.receivingPhotos.forEachIndexed { index, uri ->
                 ReceivedPhotoOrbitToGalleryFlyer(
@@ -394,11 +405,13 @@ fun WorkbenchScreen(
                 label = "settings_transform"
             ) { isOpen ->
                 if (!isOpen) {
+                    // ── Two liquid buttons with spacer ───────────────────────
                     Row(
                         modifier = Modifier.padding(bottom = 24.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
+                        // Exit button
                         LiquidButton(
                             onClick      = { viewModel.onExitRequested() },
                             backdrop     = backdrop,
@@ -415,6 +428,7 @@ fun WorkbenchScreen(
 
                         Spacer(Modifier.width(12.dp))
 
+                        // Settings button — sharedBounds connects it to the panel
                         LiquidButton(
                             onClick      = { showSettings = true },
                             backdrop     = backdrop,
@@ -437,6 +451,7 @@ fun WorkbenchScreen(
                         }
                     }
                 } else {
+                    // ── Settings panel expands from the button ───────────────
                     SettingsPanel(
                         themeRepository = app.themeRepository,
                         backdrop        = backdrop,
@@ -454,6 +469,7 @@ fun WorkbenchScreen(
             }
         }
 
+        // ── "+" liquid glass button — hidden when settings panel is open ─────
         AnimatedVisibility(
             visible = !showSettings,
             enter   = fadeIn(tween(300)) + scaleIn(tween(300), initialScale = 0.85f),
@@ -475,6 +491,7 @@ fun WorkbenchScreen(
             }
         }
 
+        // ── AGSL ripple on transfer complete ─────────────────────────────────
         if (uiState.showRipple) {
             RippleOverlay(
                 coreCenter = coreCenter,
@@ -508,6 +525,7 @@ fun WorkbenchScreen(
         )
         } // end sliding Box
 
+        // ── MotherCore: outside sliding box, counter-translated to stay fixed ─
         Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -573,6 +591,7 @@ fun WorkbenchScreen(
     }
 }
 
+// ── Liquid glass segmented button row ──────────────────────────────────────
 @Composable
 private fun <T> LiquidSegmentedButtonRow(
     items: List<T>,
@@ -627,6 +646,7 @@ private fun <T> LiquidSegmentedButtonRow(
     }
 }
 
+// ── Settings panel: liquid glass bottom container ───────────────────────────
 @Composable
 private fun SettingsPanel(
     themeRepository: ThemeRepository,
@@ -654,6 +674,7 @@ private fun SettingsPanel(
             )
             .padding(horizontal = 24.dp, vertical = 16.dp)
     ) {
+        // ── Liquid glass close button ────────────────────────────────────────
         LiquidButton(
             onClick      = onClose,
             backdrop     = backdrop,
@@ -672,6 +693,7 @@ private fun SettingsPanel(
             verticalArrangement = Arrangement.spacedBy(20.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
+            // ── Liquid glass "Settings" title pill ───────────────────────────
             Box(
                 modifier = Modifier
                     .drawBackdrop(
@@ -750,6 +772,7 @@ private fun SettingsPanel(
     }
 }
 
+// ── Received photo materializing into orbit ────────────────────────────────────
 @Composable
 private fun ReceivedPhotoMaterializeFlyer(
     uri: Uri,
@@ -764,8 +787,9 @@ private fun ReceivedPhotoMaterializeFlyer(
     }
 
     val progress = animProgress.value
-    if (progress >= 1f) return
+    if (progress >= 1f) return  // Animation complete, now in orbit via PhotoOrbit
 
+    // Phase 1 (0-0.15): Materialize with scale pulse at blob center
     val pulsePhase = (progress / 0.15f).coerceIn(0f, 1f)
     val pulseScale = if (pulsePhase < 0.5f) {
         lerp(0f, 1.2f, pulsePhase * 2f)
@@ -773,6 +797,7 @@ private fun ReceivedPhotoMaterializeFlyer(
         lerp(1.2f, 1f, (pulsePhase - 0.5f) * 2f)
     }
 
+    // Phase 2 (0.15-1): Fly outward to orbit position
     val flightPhase = ((progress - 0.15f) / 0.85f).coerceIn(0f, 1f)
 
     val baseOrbitRadiusPx = with(density) { 100.dp.toPx() }
@@ -807,6 +832,7 @@ private fun ReceivedPhotoMaterializeFlyer(
     )
 }
 
+// ── Received photo flying from orbit into gallery ─────────────────────────────
 @Composable
 private fun ReceivedPhotoOrbitToGalleryFlyer(
     uri: Uri,
@@ -821,7 +847,7 @@ private fun ReceivedPhotoOrbitToGalleryFlyer(
     }
 
     val progress = animProgress.value
-    if (progress >= 1f) return
+    if (progress >= 1f) return  // Animation complete, now in gallery
 
     val gridItemSizeDp = 100.dp
     val paddingDp = 8.dp
@@ -836,10 +862,12 @@ private fun ReceivedPhotoOrbitToGalleryFlyer(
         paddingDp.toPx() + row * (gridItemSizeDp.toPx() + gapDp.toPx()) + gridItemSizeDp.toPx() / 2f
     }
 
+    // Start from current orbit position (roughly at base radius)
     val baseOrbitRadiusPx = with(density) { 100.dp.toPx() }
     val orbitX = coreCenter.x + baseOrbitRadiusPx
     val orbitY = coreCenter.y
 
+    // Fly from orbit to gallery position
     val x = lerp(orbitX, targetX, progress)
     val y = lerp(orbitY, targetY, progress)
 
@@ -860,6 +888,80 @@ private fun ReceivedPhotoOrbitToGalleryFlyer(
     )
 }
 
+// ── Received photo flying into gallery ──────────────────────────────────────────
+@Composable
+private fun ReceivedPhotoFlyer(
+    uri: Uri,
+    coreCenter: Offset,
+    gridItemIndex: Int
+) {
+    val density = LocalDensity.current
+    val animProgress = remember { Animatable(0f) }
+
+    LaunchedEffect(Unit) {
+        animProgress.animateTo(1f, tween(2000, easing = FastOutSlowInEasing))
+    }
+
+    val progress = animProgress.value
+
+    // Only render while animating; once complete, photo is in gallery at Z0
+    if (progress >= 1f) return
+
+    val gridItemSizeDp = 100.dp
+    val paddingDp = 8.dp
+    val gapDp = 4.dp
+    val col = gridItemIndex % 3
+    val row = gridItemIndex / 3
+
+    val targetX = with(density) {
+        paddingDp.toPx() + col * (gridItemSizeDp.toPx() + gapDp.toPx()) + gridItemSizeDp.toPx() / 2f
+    }
+    val targetY = with(density) {
+        paddingDp.toPx() + row * (gridItemSizeDp.toPx() + gapDp.toPx()) + gridItemSizeDp.toPx() / 2f
+    }
+
+    // Phase 1 (0-0.2): Materialize with scale pulse + brief orbit glow
+    val pulsePhase = (progress / 0.2f).coerceIn(0f, 1f)
+    val pulseScale = if (pulsePhase < 0.5f) {
+        lerp(0f, 1.2f, pulsePhase * 2f)
+    } else {
+        lerp(1.2f, 1f, (pulsePhase - 0.5f) * 2f)
+    }
+
+    // Phase 2 (0.2-0.4): Move horizontally to clear blob
+    val horizontalPhase = ((progress - 0.2f) / 0.2f).coerceIn(0f, 1f)
+    val horizontalDir = if (targetX < coreCenter.x) -1f else 1f
+    val clearDistance = with(density) { 150.dp.toPx() }
+    val clearX = coreCenter.x + (clearDistance * horizontalDir * horizontalPhase)
+
+    // Phase 3 (0.4-1): Fly to target grid position at Z1
+    val flightPhase = ((progress - 0.4f) / 0.6f).coerceIn(0f, 1f)
+    val x = lerp(clearX, targetX, flightPhase)
+    val y = lerp(coreCenter.y, targetY, flightPhase)
+
+    AsyncImage(
+        model = uri,
+        contentDescription = null,
+        contentScale = ContentScale.Crop,
+        modifier = Modifier
+            .size(gridItemSizeDp)
+            .offset {
+                IntOffset(
+                    (x - gridItemSizeDp.toPx() / 2f).roundToInt(),
+                    (y - gridItemSizeDp.toPx() / 2f).roundToInt()
+                )
+            }
+            .clip(RoundedCornerShape(12.dp))
+            .graphicsLayer {
+                val displayScale = if (progress < 0.2f) pulseScale else 1f
+                scaleX = displayScale
+                scaleY = displayScale
+            }
+            .zIndex(1f)
+    )
+}
+
+// ── Photo grid item ─────────────────────────────────────────────────────────────
 @Composable
 private fun PhotoGridItem(
     uri: Uri,
