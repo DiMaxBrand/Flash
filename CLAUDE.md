@@ -348,6 +348,9 @@ fun updateFrame(yuv: ByteArray) {
 - **UI non-blocking**: Analysis runs on background thread, doesn't freeze Compose
 - **Deterministic colors**: HSV palette ensures distinct, visually separable hues
 
+### Diagnostics (no computer available)
+Camera mode shows the last 5 mDNS events (`CameraHandshakeManager.status`) in a box at the top of the workbench: advertising registered/failed (with NSD error code), search started/failed, services found/lost, resolve failures (with retry on code 3), and the resolved `ip:port`. A failed download shows a red "Transfer failed: <ExceptionClass: message>" pill and restarts discovery after 4 s (NSD reports a sender only once per search). Resolves are queued one at a time (NSD allows one active resolve). Ask the user to read these lines back when pairing misbehaves.
+
 ### Pairing Mode Setting
 Settings has a **Pairing method** row (`HandshakeMode`: AUTO / NFC / CAMERA, stored in `ThemeRepository`).
 - AUTO: NFC always; camera also on HyperOS (`DeviceDetector.isHyperOSDevice()`)

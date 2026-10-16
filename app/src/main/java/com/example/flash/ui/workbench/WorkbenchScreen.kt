@@ -395,6 +395,44 @@ fun WorkbenchScreen(
             }
         }
 
+        // ── Pairing diagnostics (camera mode): what mDNS is doing, readable on the phone ──
+        if (uiState.cameraHandshakeEnabled) {
+            val handshakeLog by (cameraHandshakeManager ?: app.cameraHandshakeManager)
+                .status.collectAsStateWithLifecycle()
+            if (handshakeLog.isNotEmpty()) {
+                androidx.compose.material3.Text(
+                    text = handshakeLog.joinToString("\n"),
+                    color = androidx.compose.ui.graphics.Color.White,
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 8.dp)
+                        .background(
+                            androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.55f),
+                            RoundedCornerShape(12.dp)
+                        )
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                )
+            }
+        }
+
+        // ── Transfer failure, with the reason (otherwise the app just silently re-scans) ──
+        uiState.transferError?.let { reason ->
+            androidx.compose.material3.Text(
+                text = "Transfer failed: $reason",
+                color = androidx.compose.ui.graphics.Color.White,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 96.dp, start = 24.dp, end = 24.dp)
+                    .background(
+                        androidx.compose.ui.graphics.Color(0xFF7A1F1F).copy(alpha = 0.92f),
+                        RoundedCornerShape(16.dp)
+                    )
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+            )
+        }
+
         // ── Scan complete popup (springs up above buttons) ────────────────────
         val showScanPopup = uiState.colorDetectionState == ColorDetectionState.Locked
         val scanPopupColor = uiState.detectedPeerColor?.displayColor

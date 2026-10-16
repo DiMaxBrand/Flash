@@ -55,7 +55,8 @@ data class WorkbenchUiState(
     val detectedPeerColor: ColorHandshake? = null,
     val colorDetectionState: ColorDetectionState = ColorDetectionState.Idle,
     val detectionStrength: Float = 0f,
-    val cameraHandshakeEnabled: Boolean = false
+    val cameraHandshakeEnabled: Boolean = false,
+    val transferError: String? = null
 )
 
 private const val LOCK_DISPLAY_MS = 3500L
@@ -363,7 +364,21 @@ class WorkbenchViewModel(
             }
             is TransferState.Failed -> {
                 _uiState.update {
-                    it.copy(nfcState = NfcUiState.Error(state.reason), isReceiving = false)
+                    it.copy(
+                        nfcState = NfcUiState.Error(state.reason),
+                        isReceiving = false,
+                        transferError = state.reason
+                    )
+                }
+                viewModelScope.launch {
+                    // A failed transfer drops the receiver back to scanning; mDNS only reports a
+                    // sender once per search, so restart the search to let it be found again.
+                    delay(4000)
+                    if (cameraEnabled && _uiState.value.selectedPhotos.isEmpty()) {
+                        cameraHandshakeManager?.startDiscovery()
+                    }
+                    delay(4000)
+                    _uiState.update { it.copy(transferError = null) }
                 }
             }
             else -> {}

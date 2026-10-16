@@ -71,7 +71,7 @@ class FileClient {
 
         val result = files.filterNotNull()
         if (result.isEmpty() && fileCount > 0) {
-            throw IOException("Could not download from $ip:$port — ${firstError?.message ?: "no response"}")
+            throw IOException("Could not download from $ip:$port — ${firstError?.let { "${it.javaClass.simpleName}: ${it.message}" } ?: "no response"}")
         }
         onProgress(1f)
 
