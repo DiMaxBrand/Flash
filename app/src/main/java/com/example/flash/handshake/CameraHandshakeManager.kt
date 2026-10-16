@@ -50,7 +50,7 @@ class CameraHandshakeManager(private val context: Context) {
         return Color.HSVToColor(floatArrayOf(hue, 0.65f, 0.95f))
     }
 
-    fun startAdvertising(displayColor: Int, port: Int, token: String, fileCount: Int) {
+    fun startAdvertising(displayColor: Int, ip: String, port: Int, token: String, fileCount: Int) {
         if (nsdManager == null) return
         stopAdvertising()
 
@@ -59,6 +59,7 @@ class CameraHandshakeManager(private val context: Context) {
             serviceType = "_flash-handshake._tcp"
             setPort(port)
             setAttribute("color", Integer.toHexString(displayColor))
+            setAttribute("ip", ip)
             setAttribute("token", token)
             setAttribute("fileCount", fileCount.toString())
         }
@@ -102,7 +103,12 @@ class CameraHandshakeManager(private val context: Context) {
             override fun onResolveFailed(serviceInfo: NsdServiceInfo?, errorCode: Int) {}
             override fun onServiceResolved(serviceInfo: NsdServiceInfo?) {
                 serviceInfo?.let { resolved ->
-                    val hostAddress = resolved.host?.hostAddress ?: return@let
+                    // NSD often resolves to an IPv6 link-local address that the HTTP client
+                    // cannot use, so the sender advertises its IPv4 explicitly.
+                    val advertisedIp = resolved.attributes["ip"]?.let { String(it, Charsets.UTF_8) }
+                    val hostAddress = advertisedIp?.takeIf { it.isNotBlank() }
+                        ?: resolved.host?.hostAddress?.substringBefore('%')
+                        ?: return@let
                     val port = resolved.port
                     val colorStr = resolved.attributes["color"]?.let { String(it, Charsets.UTF_8) } ?: return@let
                     val color = try { Integer.parseUnsignedInt(colorStr, 16) } catch (_: Exception) { Color.BLUE }

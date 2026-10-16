@@ -45,6 +45,7 @@ class FileClient {
         val files = arrayOfNulls<File>(fileCount)
         val checksums = arrayOfNulls<String>(fileCount)
         val lock = Any()
+        var firstError: Throwable? = null
 
         supervisorScope {
             (0 until fileCount).forEach { index ->
@@ -61,13 +62,18 @@ class FileClient {
                             files[index] = file
                             checksums[index] = checksum
                         }
+                    }.onFailure { error ->
+                        synchronized(lock) { if (firstError == null) firstError = error }
                     }
                 }
             }
         }
 
-        onProgress(1f)
         val result = files.filterNotNull()
+        if (result.isEmpty() && fileCount > 0) {
+            throw IOException("Could not download from $ip:$port — ${firstError?.message ?: "no response"}")
+        }
+        onProgress(1f)
 
         // Async corruption check in background
         launchVerification(files, checksums, onFileVerified, onCorrupted)

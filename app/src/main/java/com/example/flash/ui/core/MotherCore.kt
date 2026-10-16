@@ -218,9 +218,10 @@ fun MotherCore(
             clipPath(blobPath) {
                 // ── Accent color overlay (color detection lock-on) ─────────────
                 if (accentColor != null) {
-                    drawRect(accentColor.copy(alpha = 0.72f))
+                    drawRect(accentColor.copy(alpha = 0.85f))
                 }
 
+                if (!viewfinderActive) {
                 // ── Rim light: bright aqua glow on the bottom-right edge ──────
                 drawCircle(
                     brush = Brush.radialGradient(
@@ -274,6 +275,7 @@ fun MotherCore(
                         endY   = center.y + baseRPx + noiseRPx
                     )
                 )
+                }
             }
 
             // ── Glassy rim outline: thin bright ring around the edge ─────────

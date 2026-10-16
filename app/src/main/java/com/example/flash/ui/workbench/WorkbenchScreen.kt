@@ -391,8 +391,7 @@ fun WorkbenchScreen(
         // ── Auto-confirm when color locks (no user tap needed) ───────────────
         LaunchedEffect(uiState.colorDetectionState) {
             if (uiState.colorDetectionState == ColorDetectionState.Locked) {
-                delay(400)  // brief moment to show solid color before starting transfer
-                viewModel.onColorConfirmed(context)
+                viewModel.onColorConfirmed(context)  // starts the download right away
             }
         }
 
@@ -559,8 +558,10 @@ fun WorkbenchScreen(
             // Shown whenever this phone is a camera-mode receiver (no photos selected,
             // not mid-transfer). The preview starts immediately; color matching starts
             // once a sender has been discovered and its color is known.
+            // Once the color is locked the camera is dropped and the core switches to that color.
             val viewfinderActive = cameraGranted && uiState.cameraHandshakeEnabled &&
-                uiState.selectedPhotos.isEmpty() && !uiState.isReceiving
+                uiState.selectedPhotos.isEmpty() && !uiState.isReceiving &&
+                uiState.colorDetectionState != ColorDetectionState.Locked
             if (viewfinderActive) {
                 MotherCoreViewfinder(
                     targetColor = uiState.detectedPeerColor?.displayColor,
@@ -598,12 +599,17 @@ fun WorkbenchScreen(
             if (viewfinderActive && uiState.colorDetectionState != ColorDetectionState.Locked) {
                 androidx.compose.material3.Text(
                     text = if (uiState.colorDetectionState == ColorDetectionState.Detecting)
-                        "Point at their MotherCore" else "Looking for a nearby sender…",
-                    color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.6f),
-                    style = MaterialTheme.typography.bodySmall,
+                        "Point at their phone" else "Looking for devices…",
+                    color = androidx.compose.ui.graphics.Color.White,
+                    style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .padding(top = 180.dp)
+                        .offset(y = 40.dp)
+                        .background(
+                            androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.6f),
+                            RoundedCornerShape(50)
+                        )
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
                 )
             }
         }

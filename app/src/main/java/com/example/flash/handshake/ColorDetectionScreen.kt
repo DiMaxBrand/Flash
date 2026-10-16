@@ -40,6 +40,8 @@ class ColorMatcher(private val targetColor: Int) {
 
     private val targetHsv = FloatArray(3)
     private var firstMatchTimeMs = -1L
+    private var lastMatchTimeMs = -1L
+    private val dropoutGraceMs = 400L  // tolerate brief misses (banding, flicker) mid-lock
     private val lockDurationMs = 1000L  // 1 second sustained match required
 
     var lastMatchStrength = 0f
@@ -56,7 +58,7 @@ class ColorMatcher(private val targetColor: Int) {
     ): Boolean {
         val cx = width / 2
         val cy = height / 2
-        val radius = minOf(width, height) / 5
+        val radius = minOf(width, height) / 4
 
         var matchingPixels = 0
         var highSatPixels = 0
@@ -78,8 +80,11 @@ class ColorMatcher(private val targetColor: Int) {
 
                 Color.RGBToHSV(r, g, b, hsv)
 
+                // Ignore very dark pixels: hue is meaningless there (also the dark bands a
+                // phone screen shows on camera when the shutter beats against its refresh).
+                if (hsv[2] < 0.12f) continue
                 // Safeguard 1: ignore low-saturation pixels (walls, shadows, furniture)
-                if (hsv[1] < 0.50f) continue
+                if (hsv[1] < 0.45f) continue
                 highSatPixels++
 
                 val hueDiff = minOf(abs(hsv[0] - targetHsv[0]), 360f - abs(hsv[0] - targetHsv[0]))
@@ -90,8 +95,7 @@ class ColorMatcher(private val targetColor: Int) {
         if (highSatPixels < 20) {
             // Not enough saturated pixels — likely looking at plain environment
             lastMatchStrength = 0f
-            firstMatchTimeMs = -1L
-            return false
+            return missedFrame()
         }
 
         // Safeguard 2: fill ratio — phone screen must dominate the sampled region
@@ -104,11 +108,19 @@ class ColorMatcher(private val targetColor: Int) {
         val now = System.currentTimeMillis()
         if (isMatch) {
             if (firstMatchTimeMs < 0) firstMatchTimeMs = now
+            lastMatchTimeMs = now
             return (now - firstMatchTimeMs) >= lockDurationMs
         } else {
-            firstMatchTimeMs = -1L
-            return false
+            return missedFrame()
         }
+    }
+
+    /** A non-matching frame only breaks the lock once it has lasted past the grace window. */
+    private fun missedFrame(): Boolean {
+        if (firstMatchTimeMs >= 0 && System.currentTimeMillis() - lastMatchTimeMs > dropoutGraceMs) {
+            firstMatchTimeMs = -1L
+        }
+        return false
     }
 }
 

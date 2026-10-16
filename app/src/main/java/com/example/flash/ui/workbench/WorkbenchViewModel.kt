@@ -58,6 +58,8 @@ data class WorkbenchUiState(
     val cameraHandshakeEnabled: Boolean = false
 )
 
+private const val LOCK_DISPLAY_MS = 3500L
+
 class WorkbenchViewModel(
     private val transferRepository: TransferRepository,
     private val nfcManager: NfcManager,
@@ -212,6 +214,7 @@ class WorkbenchViewModel(
         if (cameraEnabled) {
             cameraHandshakeManager?.startAdvertising(
                 displayColor = _uiState.value.displayColor ?: 0xFFFF0000.toInt(),
+                ip = localIp,
                 port = currentPort,
                 token = currentToken,
                 fileCount = transferRepository.servingFileCount
@@ -288,7 +291,8 @@ class WorkbenchViewModel(
     }
 
     private fun onColorPeerDetected(handshake: ColorHandshake) {
-        if (cameraEnabled && _uiState.value.selectedPhotos.isEmpty()) {
+        if (cameraEnabled && _uiState.value.selectedPhotos.isEmpty() &&
+            _uiState.value.colorDetectionState != ColorDetectionState.Locked) {
             _uiState.update {
                 it.copy(
                     detectedPeerColor = handshake,
@@ -303,11 +307,13 @@ class WorkbenchViewModel(
     }
 
     fun onColorLocked() {
+        if (_uiState.value.colorDetectionState == ColorDetectionState.Locked) return
         _uiState.update { it.copy(colorDetectionState = ColorDetectionState.Locked) }
     }
 
     fun onColorConfirmed(context: Context) {
         val handshake = _uiState.value.detectedPeerColor ?: return
+        _uiState.update { it.copy(isReceiving = true) }
         startDownload(
             PeerHandshake(
                 ip = handshake.ip,
@@ -318,12 +324,16 @@ class WorkbenchViewModel(
             ),
             context
         )
-        _uiState.update {
-            it.copy(
-                colorDetectionState = ColorDetectionState.Idle,
-                detectedPeerColor = null,
-                detectionStrength = 0f
-            )
+        // Keep the locked color and the "scan complete" popup on screen long enough to read.
+        viewModelScope.launch {
+            delay(LOCK_DISPLAY_MS)
+            _uiState.update {
+                it.copy(
+                    colorDetectionState = ColorDetectionState.Idle,
+                    detectedPeerColor = null,
+                    detectionStrength = 0f
+                )
+            }
         }
     }
 
