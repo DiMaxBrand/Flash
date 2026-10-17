@@ -12,8 +12,8 @@ android {
         applicationId = "com.example.flash"
         minSdk = 26
         targetSdk = 35
-        versionCode = 49
-        versionName = "0.10.3-settings-on-top, Oct 17"
+        versionCode = 50
+        versionName = "0.11.0-nfc-reader, Oct 17"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

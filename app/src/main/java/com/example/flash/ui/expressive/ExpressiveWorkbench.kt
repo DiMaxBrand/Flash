@@ -121,6 +121,7 @@ fun ExpressiveWorkbench(
     state: WorkbenchUiState,
     themeRepository: ThemeRepository,
     handshakeLog: List<String>,
+    nfcLog: List<String>,
     permissionSummary: String,
     missingPermissions: Boolean,
     onRequestPermissions: () -> Unit,
@@ -275,6 +276,33 @@ fun ExpressiveWorkbench(
                                 text = permissionSummary +
                                     (if (missingPermissions) "  (tap to grant)" else "") +
                                     (if (handshakeLog.isNotEmpty()) "\n" + handshakeLog.joinToString("\n") else ""),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                            )
+                        }
+                    }
+                    if (state.nfcOff) {
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            modifier = Modifier.clickable { context.startActivity(Intent(Settings.ACTION_NFC_SETTINGS)) }
+                        ) {
+                            Text(
+                                text = "NFC is off — tap to turn it on",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                            )
+                        }
+                    }
+                    if (nfcLog.isNotEmpty()) {
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.92f)
+                        ) {
+                            Text(
+                                text = "NFC\n" + nfcLog.joinToString("\n"),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)

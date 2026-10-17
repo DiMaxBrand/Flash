@@ -3,7 +3,9 @@
     android:description="@string/hce_service_desc"
     android:requireDeviceUnlock="false">
     <aid-group android:description="@string/hce_aid_group_desc" android:category="other">
-        <!-- Custom proprietary AID (F0394D4B03) to avoid system NFC tag app conflicts -->
+        <!-- Our own AID: the Flash reader selects it directly (phone to phone) -->
         <aid-filter android:name="F0394D4B03" />
+        <!-- The standard NFC Forum NDEF tag application, so Android's own tag reading also sees the handshake -->
+        <aid-filter android:name="D2760000850101" />
     </aid-group>
 </host-apdu-service>

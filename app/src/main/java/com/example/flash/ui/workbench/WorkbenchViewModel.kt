@@ -61,6 +61,7 @@ data class WorkbenchUiState(
     val incoming: List<IncomingPhoto> = emptyList(),   // photos on their way here (Expressive cards / Liquid session)
     val liquidSession: Boolean = false,                 // the Liquid receive session is running (photos handled one by one)
     val cardSession: Boolean = false,                   // the same session, shown as Expressive cards and tray tiles
+    val nfcOff: Boolean = false,                        // NFC pairing is wanted but NFC is switched off in the system settings
     val legacyReceive: Boolean = false,                 // the sender has no previews: old orbit flow
     val featuredIndex: Int? = null,                     // the photo currently materializing inside the core
     val explainIndex: Int? = null,                      // the user tapped a damaged photo
@@ -568,6 +569,8 @@ class WorkbenchViewModel(
     private val savedToGallery = mutableSetOf<String>()
 
     fun updateWifiStatus(context: Context) {
+        val nfcOff = nfcEnabled && nfcManager.isNfcAvailable && !nfcManager.isNfcEnabled
+        if (nfcOff != _uiState.value.nfcOff) _uiState.update { it.copy(nfcOff = nfcOff) }
         val connected = hasLocalNetwork(context)
         if (connected) hotspotPromptDismissed = false   // ask again next time it drops
         if (connected != _uiState.value.isWifiConnected) {

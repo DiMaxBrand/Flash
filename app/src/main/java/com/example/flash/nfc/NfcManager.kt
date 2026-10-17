@@ -2,6 +2,7 @@ package com.example.flash.nfc
 
 import android.app.Activity
 import android.app.PendingIntent
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -9,10 +10,17 @@ import android.nfc.NdefMessage
 import android.nfc.NdefRecord
 import android.nfc.NfcAdapter
 import android.nfc.Tag
+import android.nfc.cardemulation.CardEmulation
+import android.nfc.tech.IsoDep
 import android.nfc.tech.Ndef
+import android.os.Bundle
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import org.json.JSONObject
 
 data class PeerHandshake(
@@ -23,6 +31,15 @@ data class PeerHandshake(
     val fileCount: Int = 1
 )
 
+/**
+ * NFC pairing. The SENDER is a card (Host Card Emulation, see [HandshakeHceService]) that serves a
+ * tiny NDEF message with its address and token. The RECEIVER is a reader: it runs reader mode, opens
+ * the other phone as ISO-DEP, selects our application and reads that message. The photos themselves
+ * never travel over NFC; they go over Wi-Fi once the receiver knows where to connect.
+ *
+ * A phone in reader mode cannot act as a card, so the screen enables reader mode only while NO photos
+ * are selected (receiver) and turns it off while photos are selected (sender).
+ */
 class NfcManager(private val context: Context) {
 
     private val adapter: NfcAdapter? = NfcAdapter.getDefaultAdapter(context)
@@ -33,12 +50,29 @@ class NfcManager(private val context: Context) {
     private val _peerHandshakeFlow = MutableSharedFlow<PeerHandshake>(extraBufferCapacity = 1)
     val peerHandshakeFlow: SharedFlow<PeerHandshake> = _peerHandshakeFlow.asSharedFlow()
 
+    /** The last few NFC events, shown on screen so a failed tap can be diagnosed without a computer. */
+    private val _status = MutableStateFlow<List<String>>(emptyList())
+    val status: StateFlow<List<String>> = _status.asStateFlow()
+
     private var outboundMessage: NdefMessage? = null
     private var activity: Activity? = null
+    private var lastToken: String? = null
+    private var lastTokenAt = 0L
+    private var readerOn = false
+
+    init {
+        HandshakeHceService.listener = { log(it) }
+    }
+
+    fun log(line: String) {
+        _status.update { (it + line).takeLast(6) }
+    }
 
     fun initialize(act: Activity) {
         activity = act
     }
+
+    // ───────────────────────────── Sender (card) ─────────────────────────────
 
     fun setOutboundHandshake(ip: String, port: Int, token: String, lang: String, fileCount: Int = 1) {
         val json = JSONObject().apply {
@@ -50,13 +84,14 @@ class NfcManager(private val context: Context) {
         }.toString()
 
         val mimeRecord = NdefRecord.createMime("application/vnd.flash.handshake", json.toByteArray(Charsets.UTF_8))
-
-        // Add Android Application Record (AAR) at the end to prevent system app conflicts
+        // Android Application Record: opens Flash if the receiving phone's app is not running
         val aarRecord = NdefRecord.createApplicationRecord("com.example.flash")
 
         val msg = NdefMessage(arrayOf(mimeRecord, aarRecord))
         outboundMessage = msg
         HandshakeHceService.ndefMessageBytes = msg.toByteArray()
+        log("card ready: $ip:$port (${msg.toByteArray().size} bytes)")
+        logDefaultHandler()
     }
 
     fun clearOutboundHandshake() {
@@ -64,26 +99,107 @@ class NfcManager(private val context: Context) {
         HandshakeHceService.ndefMessageBytes = null
     }
 
-    fun enableReaderMode(act: Activity, callback: (NdefMessage) -> Unit) {
+    /** Tells whether Android will actually route our AIDs to Flash (another NFC app could be in the way). */
+    private fun logDefaultHandler() {
+        val ad = adapter ?: return
+        runCatching {
+            val emulation = CardEmulation.getInstance(ad)
+            val me = ComponentName(context, HandshakeHceService::class.java)
+            val own = emulation.isDefaultServiceForAid(me, "F0394D4B03")
+            if (!own) log("card: Android routes our NFC id to another app")
+        }
+    }
+
+    /** While photos are selected, ask Android to prefer Flash's card service (only works with the app in front). */
+    fun setPreferredCardService(act: Activity, preferred: Boolean) {
+        val ad = adapter ?: return
+        runCatching {
+            val emulation = CardEmulation.getInstance(ad)
+            if (preferred) emulation.setPreferredService(act, ComponentName(context, HandshakeHceService::class.java))
+            else emulation.unsetPreferredService(act)
+        }
+    }
+
+    // ───────────────────────────── Receiver (reader) ─────────────────────────────
+
+    fun enableReaderMode(act: Activity) {
+        val ad = adapter
+        if (ad == null) { log("this phone has no NFC"); return }
+        if (!ad.isEnabled) { log("NFC is switched off in the system settings"); return }
         val flags = NfcAdapter.FLAG_READER_NFC_A or
-                    NfcAdapter.FLAG_READER_NFC_B or
-                    NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK
-        adapter?.enableReaderMode(act, { tag ->
-            val ndef = Ndef.get(tag)
-            if (ndef != null) {
-                try {
-                    ndef.connect()
-                    val msg = ndef.ndefMessage
-                    if (msg != null) callback(msg)
-                    ndef.close()
-                } catch (_: Exception) { }
-            }
-        }, flags, null)
+                NfcAdapter.FLAG_READER_NFC_B or
+                NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK
+        val options = Bundle().apply { putInt(NfcAdapter.EXTRA_READER_PRESENCE_CHECK_DELAY, 250) }
+        runCatching {
+            ad.enableReaderMode(act, { tag -> readIsoDep(tag) }, flags, options)
+            if (!readerOn) log("reader on: touch the sender's phone")
+            readerOn = true
+        }.onFailure { log("reader mode failed: ${it.javaClass.simpleName}: ${it.message}") }
     }
 
     fun disableReaderMode(act: Activity) {
-        adapter?.disableReaderMode(act)
+        runCatching { adapter?.disableReaderMode(act) }
+        readerOn = false
     }
+
+    /**
+     * Phone to phone: SELECT our application, SELECT the NDEF file, READ BINARY (length, then the message).
+     * Falls back to the standard NDEF tag application if ours is not answered.
+     */
+    private fun readIsoDep(tag: Tag) {
+        val iso = IsoDep.get(tag)
+        if (iso == null) {
+            log("touched something that is not a phone (${tag.techList.joinToString { it.substringAfterLast('.') }})")
+            return
+        }
+        try {
+            iso.connect()
+            iso.timeout = 3000
+            var reply = iso.transceive(selectAid(HandshakeHceService.CUSTOM_AID))
+            if (!ok(reply)) {
+                log("our app: sw=${sw(reply)}, trying the standard NDEF app")
+                reply = iso.transceive(selectAid(HandshakeHceService.NDEF_AID))
+                if (!ok(reply)) { log("no Flash handshake on that phone (sw=${sw(reply)})"); return }
+            }
+            reply = iso.transceive(byteArrayOf(0x00, 0xA4.toByte(), 0x00, 0x0C, 0x02, 0xE1.toByte(), 0x04))
+            if (!ok(reply)) { log("select NDEF file: sw=${sw(reply)}"); return }
+
+            reply = iso.transceive(readBinary(0, 2))
+            if (!ok(reply) || reply.size < 4) { log("read length: sw=${sw(reply)}"); return }
+            val length = ((reply[0].toInt() and 0xFF) shl 8) or (reply[1].toInt() and 0xFF)
+            if (length <= 0 || length > 1022) { log("nothing to share yet (length $length)"); return }
+
+            val message = ByteArray(length)
+            var offset = 0
+            while (offset < length) {
+                val chunk = minOf(48, length - offset)
+                reply = iso.transceive(readBinary(offset + 2, chunk))
+                if (!ok(reply) || reply.size < chunk + 2) { log("read at $offset: sw=${sw(reply)}"); return }
+                reply.copyInto(message, offset, 0, chunk)
+                offset += chunk
+            }
+            log("read $length bytes")
+            parseAndEmit(NdefMessage(message))
+        } catch (e: Exception) {
+            log("read failed: ${e.javaClass.simpleName}: ${e.message ?: "contact lost, hold still"}")
+        } finally {
+            runCatching { iso.close() }
+        }
+    }
+
+    private fun selectAid(aid: ByteArray): ByteArray =
+        byteArrayOf(0x00, 0xA4.toByte(), 0x04, 0x00, aid.size.toByte()) + aid + byteArrayOf(0x00)
+
+    private fun readBinary(offset: Int, length: Int): ByteArray =
+        byteArrayOf(0x00, 0xB0.toByte(), ((offset shr 8) and 0x7F).toByte(), (offset and 0xFF).toByte(), length.toByte())
+
+    private fun ok(reply: ByteArray?): Boolean =
+        reply != null && reply.size >= 2 && reply[reply.size - 2] == 0x90.toByte() && reply[reply.size - 1] == 0x00.toByte()
+
+    private fun sw(reply: ByteArray?): String =
+        if (reply == null || reply.size < 2) "none" else "%02X%02X".format(reply[reply.size - 2], reply[reply.size - 1])
+
+    // ───────────────────────────── Foreground dispatch / launch intents ─────────────────────────────
 
     fun enableForegroundDispatch(
         act: Activity,
@@ -95,9 +211,10 @@ class NfcManager(private val context: Context) {
     }
 
     fun disableForegroundDispatch(act: Activity) {
-        adapter?.disableForegroundDispatch(act)
+        runCatching { adapter?.disableForegroundDispatch(act) }
     }
 
+    /** A tag/NDEF intent from the system (for example the app was started by touching the sender's phone). */
     fun handleIntent(intent: Intent) {
         val action = intent.action ?: return
         if (action != NfcAdapter.ACTION_NDEF_DISCOVERED &&
@@ -122,33 +239,13 @@ class NfcManager(private val context: Context) {
         } else {
             @Suppress("DEPRECATION")
             intent.getParcelableExtra(NfcAdapter.EXTRA_TAG)
-        }
-        tag?.let { readTagAndEmit(it) }
-        tag?.let { writeOutboundToTag(it) }
+        } ?: return
+        // Off the main thread: reading a tag blocks
+        Thread { readIsoDep(tag) }.start()
     }
 
     fun handleNdefMessage(message: NdefMessage) {
         parseAndEmit(message)
-    }
-
-    private fun readTagAndEmit(tag: Tag) {
-        val ndef = Ndef.get(tag) ?: return
-        try {
-            ndef.connect()
-            val msg = ndef.ndefMessage
-            ndef.close()
-            msg?.let { parseAndEmit(it) }
-        } catch (_: Exception) { }
-    }
-
-    private fun writeOutboundToTag(tag: Tag) {
-        val msg = outboundMessage ?: return
-        val ndef = Ndef.get(tag) ?: return
-        try {
-            ndef.connect()
-            if (ndef.isWritable) ndef.writeNdefMessage(msg)
-            ndef.close()
-        } catch (_: Exception) { }
     }
 
     private fun parseAndEmit(message: NdefMessage) {
@@ -170,8 +267,16 @@ class NfcManager(private val context: Context) {
                 )
             }.getOrNull() ?: continue
 
+            // The phones stay together for a while: do not start the same transfer twice
+            val now = System.currentTimeMillis()
+            if (handshake.token == lastToken && now - lastTokenAt < 8_000) return
+            lastToken = handshake.token
+            lastTokenAt = now
+
+            log("got ${handshake.ip}:${handshake.port}, ${handshake.fileCount} file(s)")
             _peerHandshakeFlow.tryEmit(handshake)
             return
         }
+        log("message had no Flash handshake")
     }
 }

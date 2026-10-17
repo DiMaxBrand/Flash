@@ -4,100 +4,117 @@ import android.nfc.cardemulation.HostApduService
 import android.os.Bundle
 
 /**
- * A robust Host Card Emulation (HCE) service that emulates an NFC Type 4 Tag
- * containing our handshake NDEF message.
+ * Host Card Emulation: the sending phone answers NFC like an NFC Forum Type 4 tag whose single NDEF
+ * file holds the handshake (ip, port, token). It answers on two application IDs:
+ *  - our own [CUSTOM_AID], which the Flash reader selects directly (the reliable phone-to-phone path), and
+ *  - the standard NDEF tag application [NDEF_AID], so Android's own tag reading (and an app that is
+ *    not open yet) can see the message as an ordinary NDEF tag too.
  */
 class HandshakeHceService : HostApduService() {
 
     companion object {
-        // Custom proprietary AID (F0394D4B03) to avoid conflicts with system NFC tag service
-        // Proprietary range: bits 8-5 of first byte set to '1' (F0 = 1111 0000)
-        private val AID_T4T = byteArrayOf(
-            0x00.toByte(), 0xA4.toByte(), 0x04.toByte(), 0x00.toByte(), 0x03.toByte(),
-            0xF0.toByte(), 0x39.toByte(), 0x4D.toByte(), 0x4B.toByte(), 0x03.toByte(),
-            0x00.toByte()
-        )
+        val CUSTOM_AID = byteArrayOf(0xF0.toByte(), 0x39, 0x4D, 0x4B, 0x03)
+        val NDEF_AID = byteArrayOf(0xD2.toByte(), 0x76, 0x00, 0x00, 0x85.toByte(), 0x01, 0x01)
 
-        private val SELECT_CC_FILE = byteArrayOf(
-            0x00.toByte(), 0xA4.toByte(), 0x00.toByte(), 0x0C.toByte(), 0x02.toByte(),
-            0xE1.toByte(), 0x03.toByte()
-        )
-
-        private val SELECT_NDEF_FILE = byteArrayOf(
-            0x00.toByte(), 0xA4.toByte(), 0x00.toByte(), 0x0C.toByte(), 0x02.toByte(),
-            0xE1.toByte(), 0x04.toByte()
-        )
+        private const val FILE_CC = 0xE103
+        private const val FILE_NDEF = 0xE104
 
         private val CC_FILE = byteArrayOf(
-            0x00, 0x0F, // CCLEN
-            0x20,       // Mapping version
-            0x00, 0x3B, // MLe (Maximum response payload size)
-            0x00, 0x34, // MLc (Maximum command payload size)
-            0x04, 0x06, 0xE1.toByte(), 0x04, // NDEF File Control TLV
-            0x04, 0x00, // Max NDEF size (1024 bytes)
-            0x00, 0x00  // Read access, write access
+            0x00, 0x0F,             // CCLEN
+            0x20,                   // mapping version 2.0
+            0x00, 0x3B,             // MLe: largest response a reader may ask for (59)
+            0x00, 0x34,             // MLc: largest command payload (52)
+            0x04, 0x06,             // NDEF file control TLV
+            0xE1.toByte(), 0x04,    // NDEF file id
+            0x04, 0x00,             // max NDEF file size: 1024
+            0x00,                   // read access: open
+            0xFF.toByte()           // write access: none
         )
 
-        private val SUCCESS_SW = byteArrayOf(0x90.toByte(), 0x00.toByte())
-        private val FAILURE_SW = byteArrayOf(0x6A.toByte(), 0x82.toByte())
+        private val OK = byteArrayOf(0x90.toByte(), 0x00)
+        private val NOT_FOUND = byteArrayOf(0x6A, 0x82.toByte())
+        private val WRONG_PARAMS = byteArrayOf(0x6A, 0x86.toByte())
+        private val UNKNOWN_INS = byteArrayOf(0x6D, 0x00)
 
+        /** The NDEF message to serve (null = nothing to share right now). */
         @Volatile
         var ndefMessageBytes: ByteArray? = null
+
+        /** Receives short log lines ("reader selected our app", ...) for the on-screen NFC status. */
+        @Volatile
+        var listener: ((String) -> Unit)? = null
     }
 
-    private var selectedFile = 0 // 0: None, 1: CC, 2: NDEF
+    private var selectedFile = 0
+    private var reads = 0
 
     override fun processCommandApdu(commandApdu: ByteArray?, extras: Bundle?): ByteArray {
-        if (commandApdu == null) return FAILURE_SW
+        if (commandApdu == null || commandApdu.size < 4) return UNKNOWN_INS
+        val ins = commandApdu[1].toInt() and 0xFF
+        val p1 = commandApdu[2].toInt() and 0xFF
 
-        // Handle SELECT by AID
-        if (commandApdu.size >= AID_T4T.size && commandApdu.take(AID_T4T.size).toByteArray().contentEquals(AID_T4T)) {
-            selectedFile = 0
-            return SUCCESS_SW
+        return when (ins) {
+            0xA4 -> select(commandApdu, p1)
+            0xB0 -> readBinary(commandApdu)
+            else -> UNKNOWN_INS
         }
+    }
 
-        // Handle SELECT by File ID
-        if (commandApdu.contentEquals(SELECT_CC_FILE)) {
-            selectedFile = 1
-            return SUCCESS_SW
+    private fun select(apdu: ByteArray, p1: Int): ByteArray {
+        if (apdu.size < 5) return WRONG_PARAMS
+        val lc = apdu[4].toInt() and 0xFF
+        if (apdu.size < 5 + lc) return WRONG_PARAMS
+        val data = apdu.copyOfRange(5, 5 + lc)
+
+        if (p1 == 0x04) {                       // by application name (AID)
+            return if (data.contentEquals(CUSTOM_AID) || data.contentEquals(NDEF_AID)) {
+                selectedFile = 0
+                reads = 0
+                listener?.invoke("card: reader selected the Flash app")
+                OK
+            } else NOT_FOUND
         }
-        if (commandApdu.contentEquals(SELECT_NDEF_FILE)) {
-            selectedFile = 2
-            return SUCCESS_SW
-        }
-
-        // Handle READ BINARY
-        if (commandApdu.size >= 5 && commandApdu[1] == 0xB0.toByte()) {
-            val offset = ((commandApdu[2].toInt() and 0xFF) shl 8) or (commandApdu[3].toInt() and 0xFF)
-            val length = commandApdu[4].toInt() and 0xFF
-
-            val data = when (selectedFile) {
-                1 -> CC_FILE
-                2 -> {
-                    val msg = ndefMessageBytes ?: return FAILURE_SW
-                    // T4T NDEF file format: 2-byte length + NDEF message
-                    val ndefFile = ByteArray(msg.size + 2)
-                    ndefFile[0] = ((msg.size shr 8) and 0xFF).toByte()
-                    ndefFile[1] = (msg.size and 0xFF).toByte()
-                    msg.copyInto(ndefFile, 2)
-                    ndefFile
-                }
-                else -> return FAILURE_SW
+        if (p1 == 0x00 && lc == 2) {            // by file id
+            val id = ((data[0].toInt() and 0xFF) shl 8) or (data[1].toInt() and 0xFF)
+            return when (id) {
+                FILE_CC -> { selectedFile = 1; OK }
+                FILE_NDEF -> { selectedFile = 2; OK }
+                else -> NOT_FOUND
             }
-
-            if (offset >= data.size) return FAILURE_SW
-            val chunkLength = minOf(length, data.size - offset)
-            val response = ByteArray(chunkLength + 2)
-            data.copyInto(response, 0, offset, offset + chunkLength)
-            response[chunkLength] = 0x90.toByte()
-            response[chunkLength + 1] = 0x00.toByte()
-            return response
         }
+        return WRONG_PARAMS
+    }
 
-        return SUCCESS_SW
+    private fun readBinary(apdu: ByteArray): ByteArray {
+        if (apdu.size < 5) return WRONG_PARAMS
+        val offset = ((apdu[2].toInt() and 0x7F) shl 8) or (apdu[3].toInt() and 0xFF)
+        val le = (apdu[4].toInt() and 0xFF).let { if (it == 0) 256 else it }
+
+        val data: ByteArray = when (selectedFile) {
+            1 -> CC_FILE
+            2 -> {
+                val msg = ndefMessageBytes ?: return NOT_FOUND
+                // Type 4 NDEF file: 2-byte length, then the NDEF message
+                ByteArray(msg.size + 2).also {
+                    it[0] = ((msg.size shr 8) and 0xFF).toByte()
+                    it[1] = (msg.size and 0xFF).toByte()
+                    msg.copyInto(it, 2)
+                }
+            }
+            else -> return NOT_FOUND
+        }
+        if (offset > data.size) return WRONG_PARAMS
+        val n = minOf(le, data.size - offset)
+        if (selectedFile == 2 && offset + n >= data.size) listener?.invoke("card: handshake read by the other phone (${data.size - 2} bytes)")
+        val out = ByteArray(n + 2)
+        data.copyInto(out, 0, offset, offset + n)
+        out[n] = 0x90.toByte()
+        out[n + 1] = 0x00
+        return out
     }
 
     override fun onDeactivated(reason: Int) {
         selectedFile = 0
+        listener?.invoke("card: link ended (${if (reason == DEACTIVATION_LINK_LOSS) "lost contact" else "reader moved on"})")
     }
 }

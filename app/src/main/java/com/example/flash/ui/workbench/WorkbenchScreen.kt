@@ -248,49 +248,26 @@ fun WorkbenchScreen(
         }
     }
 
-    // ── NFC Foreground Dispatch (intercepts NFC before system dialog) ────────
-    // Enable foreground dispatch ALWAYS when screen is visible, regardless of mode
-    // This prevents Android's NFC app selector dialog from interfering with the handshake
-    LaunchedEffect(nfcOn) {
-        val act = context as? android.app.Activity ?: return@LaunchedEffect
-        if (!nfcOn) {
-            nfcManager.disableForegroundDispatch(act)
-            return@LaunchedEffect
-        }
-        val pendingIntent = PendingIntent.getActivity(
-            context, 0,
-            Intent(context, act::class.java).apply { addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP) },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
-        )
-        val filters = arrayOf(
-            IntentFilter(NfcAdapter.ACTION_NDEF_DISCOVERED),
-            IntentFilter(NfcAdapter.ACTION_TECH_DISCOVERED),
-            IntentFilter(NfcAdapter.ACTION_TAG_DISCOVERED)
-        )
-        // Enable foreground dispatch in both send and receive modes
-        nfcManager.enableForegroundDispatch(act, pendingIntent, filters)
-    }
-
-    // ── NFC Preferred Service (receiver mode only) ──────────────────────────
-    // When receiving, set Flash as the preferred HCE service to override system NFC routing
-    LaunchedEffect(uiState.isReceiving) {
-        val act = context as? android.app.Activity ?: return@LaunchedEffect
-        val adapter = NfcAdapter.getDefaultAdapter(context) ?: return@LaunchedEffect
-
-        if (uiState.isReceiving && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            try {
-                val cardEmulation = CardEmulation.getInstance(adapter)
-                val hostApduService = ComponentName(context, "com.example.flash.nfc.HandshakeHceService")
-                cardEmulation.setPreferredService(act, hostApduService)
-            } catch (e: Exception) {
-                android.util.Log.w("Flash", "Could not set preferred NFC service", e)
+    // ── NFC roles ───────────────────────────────────────────────────────────
+    // No photos selected = RECEIVER: reader mode on, it reads the other phone's card.
+    // Photos selected    = SENDER: reader mode off (a reader cannot be a card), and Flash is asked to be
+    // the preferred card service. Re-applied on every return to the app, because onPause switches NFC off.
+    val isSender = uiState.selectedPhotos.isNotEmpty()
+    androidx.lifecycle.compose.LifecycleResumeEffect(nfcOn, isSender, uiState.nfcOff) {
+        val act = context as? android.app.Activity
+        if (act != null && nfcOn) {
+            if (isSender) {
+                nfcManager.disableReaderMode(act)
+                nfcManager.setPreferredCardService(act, true)
+            } else {
+                nfcManager.setPreferredCardService(act, false)
+                nfcManager.enableReaderMode(act)
             }
-        } else if (!uiState.isReceiving) {
-            try {
-                val cardEmulation = CardEmulation.getInstance(adapter)
-                cardEmulation.unsetPreferredService(act)
-            } catch (e: Exception) {
-                // Device may not support this
+        }
+        onPauseOrDispose {
+            if (act != null) {
+                nfcManager.disableReaderMode(act)
+                nfcManager.setPreferredCardService(act, false)
             }
         }
     }
@@ -422,11 +399,13 @@ fun WorkbenchScreen(
     if (uiStyle == UiStyle.EXPRESSIVE) {
         val handshakeLog by (cameraHandshakeManager ?: app.cameraHandshakeManager)
             .status.collectAsStateWithLifecycle()
+        val nfcLog by nfcManager.status.collectAsStateWithLifecycle()
         ExpressiveWorkbench(
             viewModel = viewModel,
             state = uiState,
             themeRepository = app.themeRepository,
             handshakeLog = handshakeLog,
+            nfcLog = if (nfcOn) nfcLog else emptyList(),
             permissionSummary = "permissions: camera ${if (cameraGranted) "yes" else "NO"} · " +
                 "nearby ${if (!nearbyKnown) "n/a" else if (nearbyGranted) "yes" else "NO"} · " +
                 "local network ${if (!localNetKnown) "n/a" else if (localNetGranted) "yes" else "NO"}",
@@ -782,6 +761,32 @@ fun WorkbenchScreen(
                                 RoundedCornerShape(12.dp)
                             )
                             .clickable { requestPairingPermissions() }
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
+                }
+            }
+
+            // ── NFC pairing: is it on, and what happened on the last touch ──
+            if (nfcOn) {
+                val nfcLog by nfcManager.status.collectAsStateWithLifecycle()
+                if (uiState.nfcOff) {
+                    androidx.compose.material3.Text(
+                        text = "NFC is off — tap to turn it on",
+                        color = androidx.compose.ui.graphics.Color.White,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier
+                            .background(androidx.compose.ui.graphics.Color(0xFF7A1F1F).copy(alpha = 0.92f), RoundedCornerShape(16.dp))
+                            .clickable { context.startActivity(Intent(android.provider.Settings.ACTION_NFC_SETTINGS)) }
+                            .padding(horizontal = 16.dp, vertical = 10.dp)
+                    )
+                }
+                if (nfcLog.isNotEmpty()) {
+                    androidx.compose.material3.Text(
+                        text = "NFC\n" + nfcLog.joinToString("\n"),
+                        color = androidx.compose.ui.graphics.Color.White,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier
+                            .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.55f), RoundedCornerShape(12.dp))
                             .padding(horizontal = 10.dp, vertical = 6.dp)
                     )
                 }
