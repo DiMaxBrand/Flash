@@ -25,6 +25,7 @@ fun SimulationDialog(viewModel: WorkbenchViewModel, onDismiss: () -> Unit) {
     var role by rememberSaveable { mutableStateOf(SimRole.RECEIVER) }
     var speed by rememberSaveable { mutableStateOf(SimSpeed.SLOW) }
     var count by rememberSaveable { mutableStateOf(3) }
+    var content by rememberSaveable { mutableStateOf(SimContent.MIXED) }
     var damage by rememberSaveable { mutableStateOf(SimDamage.NONE) }
 
     AlertDialog(
@@ -37,7 +38,15 @@ fun SimulationDialog(viewModel: WorkbenchViewModel, onDismiss: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall
                 )
                 Choice("I am the", SimRole.entries, role, { role = it }) { if (it == SimRole.RECEIVER) "Receiver" else "Sender" }
-                Choice("Network", SimSpeed.entries, speed, { speed = it }) { if (it == SimSpeed.FAST) "Fast" else "Slow (1 s per file)" }
+                Choice("Network", SimSpeed.entries, speed, { speed = it }) { if (it == SimSpeed.FAST) "Fast" else "Slow (photo 1 s, video 6 s)" }
+                Choice("Sending", SimContent.entries, content, { content = it }) {
+                    when (it) {
+                        SimContent.PHOTOS -> "Photos"
+                        SimContent.MIXED -> "Mixed (photo, video, document)"
+                        SimContent.VIDEOS -> "Videos"
+                        SimContent.FILES -> "Documents"
+                    }
+                }
                 Choice("Photos", listOf(1, 3, 5, 8, 15), count, { count = it }) { it.toString() }
                 if (role == SimRole.RECEIVER) {
                     Choice("Photo 2 arrives", SimDamage.entries, damage, { damage = it }) {
@@ -52,7 +61,7 @@ fun SimulationDialog(viewModel: WorkbenchViewModel, onDismiss: () -> Unit) {
         },
         confirmButton = {
             TextButton(onClick = {
-                viewModel.startSimulation(role, speed, count, if (role == SimRole.RECEIVER) damage else SimDamage.NONE)
+                viewModel.startSimulation(role, speed, count, if (role == SimRole.RECEIVER) damage else SimDamage.NONE, content)
                 onDismiss()
             }) { Text("Start") }
         },

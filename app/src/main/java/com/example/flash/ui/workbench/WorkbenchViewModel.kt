@@ -876,12 +876,12 @@ class WorkbenchViewModel(
 
     val simulationRunning: Boolean get() = simJob?.isActive == true
 
-    fun startSimulation(role: SimRole, speed: SimSpeed, count: Int, damage: SimDamage) {
+    fun startSimulation(role: SimRole, speed: SimSpeed, count: Int, damage: SimDamage, content: SimContent) {
         stopSimulation()
         simSpeed = speed
         simDamage = damage
         simJob = viewModelScope.launch {
-            if (role == SimRole.RECEIVER) simReceive(count) else simSend(count)
+            if (role == SimRole.RECEIVER) simReceive(count, content) else simSend(count, content)
         }
     }
 
@@ -892,6 +892,7 @@ class WorkbenchViewModel(
         simActive = false
         val gone = simUris
         simUris = emptySet()
+        gone.forEach { MediaRegistry.infos.remove(it) }
         _uiState.update {
             it.copy(
                 incoming = emptyList(), liquidSession = false, isReceiving = false, sessionColor = null,
@@ -902,11 +903,14 @@ class WorkbenchViewModel(
         }
     }
 
-    private val simPerFileMs get() = if (simSpeed == SimSpeed.SLOW) 1000L else 60L
+    /** How long one item takes: a picture 1 s on the slow network, a video 6 s, a document 2.5 s. */
+    private fun simDuration(kind: MediaKind): Long =
+        if (simSpeed == SimSpeed.SLOW) when (kind) { MediaKind.IMAGE -> 1000L; MediaKind.VIDEO -> 6000L; MediaKind.FILE -> 2500L }
+        else when (kind) { MediaKind.IMAGE -> 60L; MediaKind.VIDEO -> 700L; MediaKind.FILE -> 250L }
 
-    private suspend fun simReceive(count: Int) {
+    private suspend fun simReceive(count: Int, content: SimContent) {
         val app = FlashApplication.instance
-        val photos = withContext(Dispatchers.Default) { SimImages.generate(app, count) }
+        val photos = withContext(Dispatchers.Default) { SimImages.generate(app, count, content) }
         simPhotos = photos.associateBy { it.index }
         simActive = true
         verifyResults.clear()
@@ -916,8 +920,11 @@ class WorkbenchViewModel(
         val list = photos.map { p ->
             IncomingPhoto(
                 index = p.index, width = p.width, height = p.height,
-                previewWidth = p.preview.width, previewHeight = p.preview.height, bandCount = 6,
-                thumb = p.thumb, open = !liquid && count <= 2
+                previewWidth = p.preview.width, previewHeight = p.preview.height,
+                bandCount = if (p.kind == MediaKind.FILE) 0 else 6,
+                thumb = if (p.kind == MediaKind.FILE) null else p.thumb,
+                open = (!liquid && count <= 2) || p.kind == MediaKind.VIDEO,
+                kind = p.kind, name = p.name, size = p.size
             )
         }
         metaReady = kotlinx.coroutines.CompletableDeferred<Boolean>().also { it.complete(true) }
@@ -942,28 +949,42 @@ class WorkbenchViewModel(
         }
     }
 
-    /** Files arrive one after another; the second one is damaged when the damage option asks for it. */
-    private suspend fun simDownload(photos: List<SimPhoto>) {
+    /**
+     * Pictures arrive one after another; videos and documents download alongside them, each with its
+     * own progress, like the real parallel downloads. The second item is damaged when asked for.
+     */
+    private suspend fun simDownload(photos: List<SimPhoto>) = kotlinx.coroutines.coroutineScope {
         val damagedIndex = if (simDamage != SimDamage.NONE) minOf(1, photos.size - 1) else -1
-        for ((i, p) in photos.withIndex()) {
-            val steps = (simPerFileMs / 50).toInt().coerceAtLeast(1)
+        val progress = java.util.concurrent.ConcurrentHashMap<Int, Float>()
+
+        suspend fun fetch(p: SimPhoto) {
+            val total = simDuration(p.kind)
+            val steps = (total / 50).toInt().coerceAtLeast(1)
             repeat(steps) { s ->
-                delay(simPerFileMs / steps)
-                _uiState.update { it.copy(transferProgress = (i + (s + 1f) / steps) / photos.size) }
+                delay(total / steps)
+                val f = (s + 1f) / steps
+                progress[p.index] = f
+                val overall = photos.sumOf { (progress[it.index] ?: 0f).toDouble() }.toFloat() / photos.size
+                _uiState.update { it.copy(transferProgress = overall) }
+                if (p.kind != MediaKind.IMAGE) updateIncoming(p.index) { it.copy(progress = f) }
             }
             val uri = Uri.fromFile(p.file)
             downloadedUris[p.index] = uri
-            updateIncoming(p.index) { it.copy(originalUri = uri) }
+            updateIncoming(p.index) { it.copy(originalUri = uri, progress = 1f) }
+            registerReceived(p.index)
             val valid = p.index != damagedIndex
             verifyResults[p.index] = valid
             updateIncoming(p.index) { it.copy(verified = valid) }
         }
-        _uiState.update { it.copy(transferProgress = 1f, nfcState = NfcUiState.Complete) }
-    }
+
+        launch { photos.filter { it.kind == MediaKind.IMAGE }.forEach { fetch(it) } }
+        photos.filter { it.kind != MediaKind.IMAGE }.forEach { launch { fetch(it) } }
+    }.also { _uiState.update { it.copy(transferProgress = 1f, nfcState = NfcUiState.Complete) } }
 
     /** Bands of a photo arrive bottom first, quickly on a fast network and visibly on a slow one. */
     private suspend fun simFeedBands(photo: IncomingPhoto) {
         val sp = simPhotos[photo.index] ?: return
+        if (photo.bandCount <= 0) return
         val bandHeight = (photo.previewHeight + photo.bandCount - 1) / photo.bandCount
         for (n in 0 until photo.bandCount) {
             delay(if (simSpeed == SimSpeed.SLOW) 150L else 15L)
@@ -973,6 +994,7 @@ class WorkbenchViewModel(
             val crop = android.graphics.Bitmap.createBitmap(sp.preview, 0, yTop, sp.preview.width, yBottom - yTop)
             updateIncoming(photo.index) { it.copy(bands = it.bands + (n to BandImage(n, yTop, yBottom - yTop, crop))) }
         }
+        if (photo.kind == MediaKind.VIDEO) composePoster(photo.index)
     }
 
     /** Retries of a damaged photo: fixed on the second attempt, or never, depending on the damage option. */
@@ -991,13 +1013,20 @@ class WorkbenchViewModel(
     }
 
     /** This phone acts as the sender: photos orbit the core, progress fills in at network speed, then "delivered". */
-    private suspend fun simSend(count: Int) {
+    private suspend fun simSend(count: Int, content: SimContent) {
         val app = FlashApplication.instance
-        val photos = withContext(Dispatchers.Default) { SimImages.generate(app, count) }
+        val photos = withContext(Dispatchers.Default) { SimImages.generate(app, count, content) }
         simPhotos = photos.associateBy { it.index }
         simActive = true
         val uris = photos.map { Uri.fromFile(it.file) }
         simUris = uris.toSet()
+        // Videos and documents are drawn from the registry, exactly like real ones picked from the "+" menu
+        photos.forEach { p ->
+            if (p.kind != MediaKind.IMAGE) {
+                MediaRegistry.infos[Uri.fromFile(p.file)] =
+                    MediaInfo(p.kind, p.name, if (p.kind == MediaKind.VIDEO) p.preview else null)
+            }
+        }
         _uiState.update {
             it.copy(
                 photos = (uris + it.photos).distinct(), selectedPhotos = it.selectedPhotos + uris,
@@ -1005,7 +1034,7 @@ class WorkbenchViewModel(
             )
         }
         delay(2500)   // the other phone "touches" now
-        val total = maxOf(600L, photos.size * simPerFileMs)
+        val total = maxOf(600L, photos.sumOf { simDuration(it.kind) })
         val tick = 40L
         var t = 0L
         while (t < total) {
@@ -1017,6 +1046,7 @@ class WorkbenchViewModel(
         delay(8000)
         simUris = emptySet()
         simActive = false
+        uris.forEach { MediaRegistry.infos.remove(it) }
         _uiState.update { it.copy(photos = it.photos - uris.toSet()) }
     }
 
