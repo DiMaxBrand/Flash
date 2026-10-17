@@ -1,24 +1,24 @@
 [versions]
-agp = "8.6.0"
+agp = "9.2.1"
 kotlin = "2.3.0"
-composeBom = "2024.12.01"
-material3 = "1.4.0-alpha11"
+composeBom = "2026.09.00"
+material3 = "1.5.0-beta01"
 ktor = "3.1.2"
-navigationCompose = "2.8.9"
-activityCompose = "1.10.1"
-lifecycle = "2.9.0"
+navigationCompose = "2.10.2"
+activityCompose = "1.13.0"
+lifecycle = "2.11.0"
 coil = "2.7.0"
-datastore = "1.1.2"
+datastore = "1.2.1"
 coroutines = "1.9.0"
-appcompat = "1.7.0"
-coreKtx = "1.15.0"
+appcompat = "1.8.0"
+coreKtx = "1.19.1"
 slf4j = "2.0.16"
 logbackAndroid = "3.0.0"
 junit = "4.13.2"
 coroutinesTest = "1.9.0"
 backdrop = "1.0.6"
 kyantShapes = "1.2.0"
-camerax = "1.4.0"
+camerax = "1.6.2"
 accompanist = "0.34.0"
 
 [libraries]
@@ -59,6 +59,5 @@ accompanist-permissions = { group = "com.google.accompanist", name = "accompanis
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
-kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }

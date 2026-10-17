@@ -5,18 +5,18 @@
 **Flash** is a premium NFC file-sharing Android application with advanced physics-based animations and liquid glass rendering. The app leverages NFC for zero-click device pairing and Wi-Fi for fast local file transfers, with a focus on visual excellence through 120Hz-optimized animations and fluid morphing effects.
 
 ### Key Tech Stack
-- **Language**: Kotlin 2.3.0
-- **UI Framework**: Jetpack Compose (BOM 2024.12.01)
-- **Material Design**: Material3 1.4.0-alpha11
+- **Language**: Kotlin 2.3.0 (built into AGP 9 — there is no `kotlin-android` plugin; `kotlin-compose` and `kotlin-serialization` remain)
+- **UI Framework**: Jetpack Compose (BOM 2026.09.00 = Compose 1.12.1)
+- **Material Design**: Material3 1.5.0-beta01 (Expressive; pinned outside the BOM, which only maps stable 1.4.0 — same as the user's Impulse app)
 - **Glass Effects**: Backdrop library 1.0.6 (SDF rendering)
 - **Networking**: Ktor CIO (3.1.2)
-- **Build System**: AGP 8.6.0, Gradle 8.14.4
-- **Min SDK**: 26, Target SDK: 35
+- **Build System**: AGP 9.2.1, Gradle 9.4.1
+- **Min SDK**: 26, Target SDK: 35, Compile SDK: 37
 
 ## Build Environment
 
 ### Android SDK Setup
-The project requires Android SDK 36 and build-tools 34+. If you see "SDK location not found" errors:
+The project requires Android SDK platform 37 (`sdkmanager "platforms;android-37.0"`) and build-tools 34+. If you see "SDK location not found" errors:
 
 1. Install Android Command Line Tools from android.com/studio
 2. Create `local.properties` in project root:
@@ -26,9 +26,9 @@ The project requires Android SDK 36 and build-tools 34+. If you see "SDK locatio
 3. Verify: `./gradlew assembleDebug` should complete in ~90 seconds
 
 ### AGP Compatibility
-- Current: AGP 8.6.0 (pinned in `gradle/libs.versions.toml`)
-- Do NOT downgrade without checking Material3 and Compose BOM compatibility
-- Kotlin 2.3.0 requires AGP 8.6.0 minimum
+- Current: AGP 9.2.1 (pinned in `gradle/libs.versions.toml`), Gradle 9.4.1. Material3 1.5.0-beta01 requires AGP 9.1+ and compileSdk 37 — do NOT downgrade
+- AGP 9 has built-in Kotlin: do not re-add `org.jetbrains.kotlin.android`
+- The unused accompanist-permissions dependency was removed (permissions use the Activity Result API)
 
 ### Gradle Properties
 - `org.gradle.jvmargs=-Xmx4096m` — required for compilation

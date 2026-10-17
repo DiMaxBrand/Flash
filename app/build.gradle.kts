@@ -1,20 +1,19 @@
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
 }
 
 android {
     namespace = "com.example.flash"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.example.flash"
         minSdk = 26
         targetSdk = 35
-        versionCode = 33
-        versionName = "0.8.17-send-progress, Oct 17"
+        versionCode = 34
+        versionName = "0.9.0-material-1.5, Oct 17"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -113,9 +112,6 @@ dependencies {
     implementation(libs.camerax.camera2)
     implementation(libs.camerax.lifecycle)
     implementation(libs.camerax.view)
-
-    // Permissions
-    implementation(libs.accompanist.permissions)
 
     // Tests
     testImplementation(libs.junit)
