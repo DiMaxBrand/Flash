@@ -16,6 +16,9 @@ enum class ThemeMode { LIGHT, DARK, SYSTEM }
 /** How two phones find each other. AUTO = NFC always, plus camera on HyperOS devices. */
 enum class HandshakeMode { AUTO, NFC, CAMERA }
 
+/** LIQUID = Mother Core + glass components; EXPRESSIVE = plain Material 3 Expressive (tray + bottom app bar). */
+enum class UiStyle { LIQUID, EXPRESSIVE }
+
 class ThemeRepository(private val dataStore: DataStore<Preferences>) {
 
     companion object {
@@ -23,6 +26,7 @@ class ThemeRepository(private val dataStore: DataStore<Preferences>) {
         private val KEY_ONBOARD = booleanPreferencesKey("onboarding_shown")
         private val KEY_LANG    = stringPreferencesKey("language")
         private val KEY_HANDSHAKE = stringPreferencesKey("handshake_mode")
+        private val KEY_UI_STYLE = stringPreferencesKey("ui_style")
     }
 
     private val preferences = dataStore.data.catch { error ->
@@ -51,6 +55,14 @@ class ThemeRepository(private val dataStore: DataStore<Preferences>) {
             "CAMERA" -> HandshakeMode.CAMERA
             else     -> HandshakeMode.AUTO
         }
+    }
+
+    val uiStyle: Flow<UiStyle> = preferences.map { prefs ->
+        if (prefs[KEY_UI_STYLE] == "EXPRESSIVE") UiStyle.EXPRESSIVE else UiStyle.LIQUID
+    }
+
+    suspend fun setUiStyle(style: UiStyle) {
+        dataStore.edit { it[KEY_UI_STYLE] = style.name }
     }
 
     suspend fun setThemeMode(mode: ThemeMode) {

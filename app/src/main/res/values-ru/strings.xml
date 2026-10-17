@@ -10,6 +10,9 @@
     <string name="handshake_auto">Авто</string>
     <string name="handshake_nfc">NFC</string>
     <string name="handshake_camera">Камера</string>
+    <string name="settings_ui_style">Интерфейс</string>
+    <string name="ui_style_liquid">Жидкий</string>
+    <string name="ui_style_expressive">Expressive</string>
     <string name="theme_light">Светлая</string>
     <string name="theme_dark">Тёмная</string>
     <string name="theme_system">Системная</string>

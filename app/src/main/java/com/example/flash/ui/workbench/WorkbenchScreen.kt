@@ -107,6 +107,8 @@ import com.example.flash.ui.core.MotherCore
 import com.example.flash.ui.shader.RippleOverlay
 import com.example.flash.ui.theme.OceanAqua
 import com.example.flash.ui.theme.HandshakeMode
+import com.example.flash.ui.theme.UiStyle
+import com.example.flash.ui.expressive.ExpressiveWorkbench
 import com.example.flash.ui.theme.ThemeMode
 import com.example.flash.util.DeviceDetector
 import com.example.flash.ui.theme.ThemeRepository
@@ -369,6 +371,27 @@ fun WorkbenchScreen(
     BackHandler(enabled = showSettings) { showSettings = false }
 
     val photoPicker      = rememberPhotoPicker { uris -> viewModel.onPhotosSelected(uris, context) }
+
+    // ── Interface style: the Material 3 Expressive layout replaces the whole liquid UI ──
+    val uiStyle by app.themeRepository.uiStyle.collectAsStateWithLifecycle(UiStyle.LIQUID)
+    if (uiStyle == UiStyle.EXPRESSIVE) {
+        val handshakeLog by (cameraHandshakeManager ?: app.cameraHandshakeManager)
+            .status.collectAsStateWithLifecycle()
+        ExpressiveWorkbench(
+            viewModel = viewModel,
+            state = uiState,
+            themeRepository = app.themeRepository,
+            handshakeLog = handshakeLog,
+            permissionSummary = "permissions: camera ${if (cameraGranted) "yes" else "NO"} · " +
+                "nearby ${if (!nearbyKnown) "n/a" else if (nearbyGranted) "yes" else "NO"} · " +
+                "local network ${if (!localNetKnown) "n/a" else if (localNetGranted) "yes" else "NO"}",
+            missingPermissions = missingPairingPermissions().isNotEmpty(),
+            onRequestPermissions = { requestPairingPermissions() },
+            cameraGranted = cameraGranted,
+            onAddPhotos = { photoPicker.launch() }
+        )
+        return
+    }
 
     // ── Single shared backdrop — grid is the capture source for all glass ───
     val backdrop = rememberLayerBackdrop()
@@ -808,6 +831,7 @@ private fun SettingsPanel(
     val context   = LocalContext.current
     val themeMode by themeRepository.themeMode.collectAsStateWithLifecycle(ThemeMode.SYSTEM)
     val handshakeMode by themeRepository.handshakeMode.collectAsStateWithLifecycle(HandshakeMode.AUTO)
+    val uiStyle by themeRepository.uiStyle.collectAsStateWithLifecycle(UiStyle.LIQUID)
 
     Box(
         modifier = modifier
@@ -913,6 +937,31 @@ private fun SettingsPanel(
                             HandshakeMode.AUTO   -> stringResource(R.string.handshake_auto)
                             HandshakeMode.NFC    -> stringResource(R.string.handshake_nfc)
                             HandshakeMode.CAMERA -> stringResource(R.string.handshake_camera)
+                        }
+                    }
+                )
+            }
+
+            HorizontalDivider(color = Color.White.copy(alpha = 0.15f))
+
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text  = stringResource(R.string.settings_ui_style),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = Color.White
+                )
+                LiquidSegmentedButtonRow(
+                    items = UiStyle.entries,
+                    selectedItem = uiStyle,
+                    onItemSelected = { scope.launch { themeRepository.setUiStyle(it) } },
+                    backdrop = backdrop,
+                    label = { style ->
+                        when (style) {
+                            UiStyle.LIQUID     -> stringResource(R.string.ui_style_liquid)
+                            UiStyle.EXPRESSIVE -> stringResource(R.string.ui_style_expressive)
                         }
                     }
                 )

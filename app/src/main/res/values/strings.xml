@@ -10,6 +10,9 @@
     <string name="handshake_auto">Auto</string>
     <string name="handshake_nfc">NFC</string>
     <string name="handshake_camera">Camera</string>
+    <string name="settings_ui_style">Interface</string>
+    <string name="ui_style_liquid">Liquid</string>
+    <string name="ui_style_expressive">Expressive</string>
     <string name="theme_light">Light</string>
     <string name="theme_dark">Dark</string>
     <string name="theme_system">System</string>
