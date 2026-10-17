@@ -30,6 +30,26 @@ class FileServer(private val scope: CoroutineScope) {
     var port: Int = 0
         private set
 
+    // Which files have been fully sent at least once; lets the sender know the transfer is done.
+    private val delivered = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
+    @Volatile private var allDeliveredFired = false
+    private val _allDelivered = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    /** Emits once every file currently served has been sent in full. */
+    val allDelivered: kotlinx.coroutines.flow.SharedFlow<Unit> = _allDelivered
+
+    private fun markDelivered(index: Int) {
+        delivered.add(index)
+        if (!allDeliveredFired && entries.isNotEmpty() && delivered.size >= entries.size) {
+            allDeliveredFired = true
+            _allDelivered.tryEmit(Unit)
+        }
+    }
+
+    private fun resetDelivery() {
+        delivered.clear()
+        allDeliveredFired = false
+    }
+
     val fileCount: Int get() = entries.size
 
     private class HashingOutputStream(private val out: OutputStream, private val digest: MessageDigest) : OutputStream() {
@@ -47,6 +67,7 @@ class FileServer(private val scope: CoroutineScope) {
     suspend fun start(token: String, uris: List<Uri>, context: Context): Int {
         stop()
         entries.clear()
+        resetDelivery()
         appContext = context.applicationContext
         uris.forEach { entries.add(token to it) }
         port = findFreePort()
@@ -95,6 +116,8 @@ class FileServer(private val scope: CoroutineScope) {
                     call.respondOutputStream(contentType = ContentType.parse(mimeType)) {
                         input.use { it.copyTo(this) }
                     }
+                    // Reached only if the whole body was written (a dropped client throws above)
+                    markDelivered(index)
                 }
             }
         }.start(wait = false)
@@ -103,6 +126,7 @@ class FileServer(private val scope: CoroutineScope) {
 
     fun addUri(token: String, uri: Uri) {
         entries.add(token to uri)
+        allDeliveredFired = false   // a new file is waiting; report again when everything is out
     }
 
     fun stop() {

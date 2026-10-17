@@ -110,6 +110,14 @@ class TransferRepository(
         }
     }
 
+    /** Emits on the sending phone once every served file has been sent in full. */
+    val sendCompleteFlow get() = server.allDelivered
+
+    /** Stops only the file server (a running download is left alone). */
+    fun stopServing() {
+        server.stop()
+    }
+
     fun stopAll() {
         downloadJob?.cancel()
         downloadJob = null

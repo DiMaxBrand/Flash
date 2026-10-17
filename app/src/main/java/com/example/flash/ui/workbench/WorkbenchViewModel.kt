@@ -106,6 +106,10 @@ class WorkbenchViewModel(
             }
             .launchIn(viewModelScope)
 
+        transferRepository.sendCompleteFlow
+            .onEach { onAllFilesDelivered() }
+            .launchIn(viewModelScope)
+
         transferRepository.fileVerifiedFlow
             .onEach { result ->
                 if (result != null) {
@@ -114,6 +118,36 @@ class WorkbenchViewModel(
                 }
             }
             .launchIn(viewModelScope)
+    }
+
+    /**
+     * Sender side: every file has been sent in full. Play the success pulse (photos collapse into
+     * the core), then clear the selection and stop advertising. The server stays up for a minute
+     * so a receiver whose checksum failed can still retry.
+     */
+    private fun onAllFilesDelivered() {
+        val state = _uiState.value
+        if (state.selectedPhotos.isEmpty() || state.isReceiving) return
+        currentPort = 0   // the next selection starts a fresh server and token
+        viewModelScope.launch {
+            _uiState.update { it.copy(transferProgress = 1f, infoMessage = "Photos delivered") }
+            delay(2600)   // let the success pulse play
+            _uiState.update {
+                it.copy(
+                    selectedPhotos = emptySet(),
+                    transferProgress = 0f,
+                    showHotspotPrompt = false,
+                    infoMessage = null
+                )
+            }
+            nfcManager.clearOutboundHandshake()
+            cameraHandshakeManager?.stopAdvertising()
+            delay(60_000)
+            val now = _uiState.value
+            if (currentPort == 0 && now.selectedPhotos.isEmpty() && !now.isReceiving) {
+                transferRepository.stopServing()
+            }
+        }
     }
 
     private fun onPhotoVerified(index: Int, isValid: Boolean) {

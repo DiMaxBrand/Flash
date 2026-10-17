@@ -13,8 +13,8 @@ android {
         applicationId = "com.example.flash"
         minSdk = 26
         targetSdk = 35
-        versionCode = 31
-        versionName = "0.8.15-ask-permissions, Oct 17"
+        versionCode = 32
+        versionName = "0.8.16-sender-done, Oct 17"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
