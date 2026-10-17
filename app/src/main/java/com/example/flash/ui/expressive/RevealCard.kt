@@ -176,8 +176,9 @@ fun RevealContent(
             )
         }
 
-        // The sharp content, masked by the wipe (offscreen so DstIn only affects this layer)
-        Box(
+        // The sharp content, masked by the wipe (offscreen so DstIn only affects this layer).
+        // A damaged photo stays a blurred thumbnail under its red tint until a retry succeeds.
+        if (!rejected) Box(
             Modifier
                 .fillMaxSize()
                 .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }

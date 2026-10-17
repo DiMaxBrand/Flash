@@ -60,6 +60,7 @@ data class WorkbenchUiState(
     val corruptedPhotos: List<Uri> = emptyList(),
     val incoming: List<IncomingPhoto> = emptyList(),   // photos on their way here (Expressive cards / Liquid session)
     val liquidSession: Boolean = false,                 // the Liquid receive session is running (photos handled one by one)
+    val cardSession: Boolean = false,                   // the same session, shown as Expressive cards and tray tiles
     val legacyReceive: Boolean = false,                 // the sender has no previews: old orbit flow
     val featuredIndex: Int? = null,                     // the photo currently materializing inside the core
     val explainIndex: Int? = null,                      // the user tapped a damaged photo
@@ -212,14 +213,12 @@ class WorkbenchViewModel(
                         verified = verifyResults[m.index]
                     )
                 }
-                _uiState.update { it.copy(incoming = list, legacyReceive = false, liquidSession = liquid) }
+                _uiState.update { it.copy(incoming = list, legacyReceive = false, liquidSession = liquid, cardSession = !liquid) }
                 metaReady.complete(true)
                 if (liquid) {
                     runLiquidSequence(handshake, list.map { it.index }.sorted())
                 } else {
-                    kotlinx.coroutines.coroutineScope {
-                        list.filter { it.open }.forEach { p -> launch { fetchBands(handshake, p) } }
-                    }
+                    runCardSequence(handshake, list)
                 }
             } finally {
                 if (bound) LocalNetwork.unbind(app)
@@ -320,7 +319,53 @@ class WorkbenchViewModel(
         setStage(index, Stage.FLYING)
     }
 
-    fun onFeaturedRevealed(index: Int) { revealWaiters.remove(index)?.complete(Unit) }
+    fun onFeaturedRevealed(index: Int) { revealWaiters[index]?.complete(Unit) }
+
+    // ───────────────────────── Card session (Expressive style) ─────────────────────────
+    // The same rules as the Liquid session, shown differently: verdicts, the background retry of a
+    // damaged photo (parked red in its place, tap for the explanation), and the final notice are the
+    // same code. Only the staging differs: photos reveal where they are (big cards or tray tiles) and
+    // the UI reports each finished reveal through onFeaturedRevealed.
+
+    private suspend fun runCardSequence(handshake: PeerHandshake, list: List<IncomingPhoto>) {
+        // A waiter per photo exists before anything can finish, so an early report is never lost
+        list.forEach { revealWaiters[it.index] = kotlinx.coroutines.CompletableDeferred() }
+        kotlinx.coroutines.coroutineScope {
+            list.filter { it.open }.forEach { p -> launch(Dispatchers.IO) { fetchBands(handshake, p) } }
+            list.forEach { p ->
+                launch {
+                    val timeout = if (p.kind == MediaKind.IMAGE) 120_000L else 30 * 60_000L
+                    if (!awaitDecided(p.index, timeout)) parkDamaged(handshake, p.index)
+                    // Shown (revealed) before it counts as done; a long wait cannot block the session forever
+                    kotlinx.coroutines.withTimeoutOrNull(90_000) { revealWaiters[p.index]?.await() }
+                    setStage(p.index, Stage.LANDED)
+                }
+            }
+        }
+        finishCardSession()
+    }
+
+    private suspend fun finishCardSession() {
+        val uris = _uiState.value.incoming.sortedBy { it.index }.mapNotNull { it.originalUri }
+        val sim = simActive
+        viewModelScope.launch {
+            val saved = if (sim) 0 else withContext(Dispatchers.IO) { uris.count { uri -> uri.path?.let { saveToGallery(File(it)) } == true } }
+            if (saved > 0) {
+                _uiState.update { it.copy(infoMessage = "Saved to the Flash folder (Pictures, Movies or Downloads)") }
+                delay(5000)
+                _uiState.update { it.copy(infoMessage = null) }
+            }
+        }
+        previewJob = null
+        _uiState.update {
+            it.copy(
+                photos = (uris + it.photos).distinct(), incoming = emptyList(), cardSession = false,
+                isReceiving = false, transferProgress = 0f, sessionColor = null, showRipple = true
+            )
+        }
+        transferRepository.reset()
+        currentPort = 0
+    }
 
     /** The flying photo reached its cell. */
     fun onFlightFinished(index: Int) = setStage(index, Stage.LANDED)
@@ -343,8 +388,8 @@ class WorkbenchViewModel(
                 }
             }
         }
-        // Still not provable: show it as received, flag it at the end
-        updateIncoming(index) { it.copy(unverifiable = true, stage = Stage.LANDED) }
+        // Still not provable: show it as received (the card may now reveal it), flag it at the end
+        updateIncoming(index) { it.copy(unverifiable = true, verified = true, stage = Stage.LANDED) }
         _uiState.update { it.copy(unverifiedCount = it.unverifiedCount + 1) }
     }
 
@@ -829,7 +874,7 @@ class WorkbenchViewModel(
                 // The preview meta decides which flow runs: the Liquid session sequencer (it already
                 // follows every file by itself) or the older orbit flow.
                 kotlinx.coroutines.withTimeoutOrNull(4000) { metaReady.await() }
-                if (_uiState.value.liquidSession) {
+                if (_uiState.value.liquidSession || _uiState.value.cardSession) {
                     _uiState.update {
                         it.copy(nfcState = NfcUiState.Complete, transferProgress = 1f, showRipple = false)
                     }
@@ -844,6 +889,9 @@ class WorkbenchViewModel(
                         isReceiving = false,
                         sessionColor = null,
                         incoming = emptyList(),
+                        liquidSession = false,
+                        cardSession = false,
+                        featuredIndex = null,
                         transferError = state.reason
                     )
                 }
@@ -896,7 +944,7 @@ class WorkbenchViewModel(
         gone.forEach { MediaRegistry.infos.remove(it) }
         _uiState.update {
             it.copy(
-                incoming = emptyList(), liquidSession = false, isReceiving = false, sessionColor = null,
+                incoming = emptyList(), liquidSession = false, cardSession = false, isReceiving = false, sessionColor = null,
                 featuredIndex = null, explainIndex = null, unverifiedCount = 0, transferProgress = 0f,
                 sendProgress = 0f, receivingPhotos = emptyList(), landingPhotos = emptySet(),
                 selectedPhotos = it.selectedPhotos - gone, photos = it.photos - gone, infoMessage = null
@@ -932,21 +980,15 @@ class WorkbenchViewModel(
         val dummy = PeerHandshake("0.0.0.0", 0, "sim", "en", count)
         _uiState.update {
             it.copy(
-                incoming = list, legacyReceive = false, liquidSession = liquid, isReceiving = true,
+                incoming = list, legacyReceive = false, liquidSession = liquid, cardSession = !liquid, isReceiving = true,
                 sessionColor = android.graphics.Color.HSVToColor(floatArrayOf(200f, 0.65f, 0.95f)),
                 nfcState = NfcUiState.Transferring, transferProgress = 0f, unverifiedCount = 0,
                 landingPhotos = emptySet(), rejectedPhotos = emptyList(), corruptedPhotos = emptyList()
             )
         }
         kotlinx.coroutines.coroutineScope {
-            val download = launch { simDownload(photos) }
-            if (liquid) {
-                runLiquidSequence(dummy, list.map { it.index })
-            } else {
-                list.filter { it.open }.forEach { p -> launch { fetchBands(dummy, p) } }
-                download.join()
-                enterSettle(photos.map { DownloadedFile(it.index, it.file, null) })
-            }
+            launch { simDownload(photos) }
+            if (liquid) runLiquidSequence(dummy, list.map { it.index }) else runCardSequence(dummy, list)
         }
     }
 
@@ -1030,7 +1072,7 @@ class WorkbenchViewModel(
                 return
             }
         }
-        updateIncoming(index) { it.copy(unverifiable = true, stage = Stage.LANDED) }
+        updateIncoming(index) { it.copy(unverifiable = true, verified = true, stage = Stage.LANDED) }
         _uiState.update { it.copy(unverifiedCount = it.unverifiedCount + 1) }
     }
 
@@ -1102,7 +1144,7 @@ class WorkbenchViewModel(
         val s = _uiState.value
         _uiState.update { it.copy(showRipple = false) }
         // Sending phone and Liquid sessions end through their own paths; only the old flow resets here
-        if (s.selectedPhotos.isNotEmpty() || s.liquidSession || (s.incoming.isNotEmpty() && !s.legacyReceive)) return
+        if (s.selectedPhotos.isNotEmpty() || s.liquidSession || s.cardSession || (s.incoming.isNotEmpty() && !s.legacyReceive)) return
         transferRepository.reset()
         currentPort = 0
     }

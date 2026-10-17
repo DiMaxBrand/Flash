@@ -12,8 +12,8 @@ android {
         applicationId = "com.example.flash"
         minSdk = 26
         targetSdk = 35
-        versionCode = 45
-        versionName = "0.9.10-sim-dialog-scroll, Oct 17"
+        versionCode = 46
+        versionName = "0.10.0-expressive-session, Oct 17"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

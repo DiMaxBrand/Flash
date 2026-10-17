@@ -100,6 +100,7 @@ import com.example.flash.ui.theme.UiStyle
 import com.example.flash.ui.workbench.ColorDetectionState
 import com.example.flash.ui.workbench.IncomingPhoto
 import com.example.flash.ui.workbench.MediaImage
+import com.example.flash.ui.workbench.Stage
 import com.example.flash.ui.workbench.WorkbenchUiState
 import com.example.flash.ui.workbench.WorkbenchViewModel
 import kotlinx.coroutines.delay
@@ -184,14 +185,8 @@ fun ExpressiveWorkbench(
         viewModel.setHoldLanding(true)   // photos stay as cards until their reveal is over
         onDispose { viewModel.setHoldLanding(false) }
     }
-    val revealed = remember { mutableStateListOf<Int>() }
-    val onRevealed: (Int) -> Unit = { index -> if (index !in revealed) revealed.add(index) }
-    LaunchedEffect(incoming.isEmpty()) { if (incoming.isEmpty()) revealed.clear() }
-    LaunchedEffect(revealed.size, incoming.map { it.verified }, incoming.size) {
-        if (incoming.isNotEmpty() && incoming.all { it.index in revealed || it.verified == false }) {
-            viewModel.onRevealFinished()
-        }
-    }
+    // Each finished reveal is reported to the session, which ends once every photo is decided and shown
+    val onRevealed: (Int) -> Unit = { index -> viewModel.onFeaturedRevealed(index) }
     // An older sender without previews: nothing to reveal, let the photos settle right away
     LaunchedEffect(state.receivingPhotos.isNotEmpty(), incoming.isEmpty()) {
         if (state.receivingPhotos.isNotEmpty() && incoming.isEmpty()) viewModel.onRevealFinished()
@@ -343,6 +338,32 @@ fun ExpressiveWorkbench(
                 }
             )
         }
+        if (state.explainIndex != null) {
+            AlertDialog(
+                onDismissRequest = { viewModel.dismissExplain() },
+                confirmButton = { TextButton(onClick = { viewModel.dismissExplain() }) { Text("OK") } },
+                text = {
+                    Text(
+                        "This photo has been damaged while transferring, but don't worry, everything is safe, " +
+                            "and we are retrying the send right now."
+                    )
+                }
+            )
+        }
+        if (state.unverifiedCount > 0 && !state.cardSession) {
+            AlertDialog(
+                onDismissRequest = { viewModel.dismissUnverified() },
+                confirmButton = { TextButton(onClick = { viewModel.dismissUnverified() }) { Text("OK") } },
+                text = {
+                    Text(
+                        (if (state.unverifiedCount == 1) "One photo couldn't" else "${state.unverifiedCount} photos couldn't") +
+                            " be proved to be transferred successfully. Check if it looks good, and if it looks good, " +
+                            "then you can ignore this message."
+                    )
+                }
+            )
+        }
+        // Only the older flow (a sender without previews) still ends in this dialog
         if (state.corruptedPhotos.isNotEmpty()) {
             AlertDialog(
                 onDismissRequest = { viewModel.dismissCorruptionAlert() },
@@ -459,13 +480,17 @@ private fun Tray(
                             useBands = false,
                             holdMs = 0,
                             cropToFill = true,
-                            rejected = photo.verified == false,
+                            rejected = photo.stage == Stage.PARKED,
                             // A photo shown big reports through its big card instead
                             onFullyRevealed = { if (photo.index !in bigIndices) onRevealed(photo.index) },
                             modifier = Modifier
                                 .size(96.dp)
-                                .clickable(enabled = incomingTiles.size > 2) {
-                                    if (photo.open) viewModel.closeIncoming(photo.index) else viewModel.openIncoming(photo.index)
+                                .clickable(enabled = incomingTiles.size > 2 || photo.stage == Stage.PARKED) {
+                                    when {
+                                        photo.stage == Stage.PARKED -> viewModel.explainDamaged(photo.index)
+                                        photo.open -> viewModel.closeIncoming(photo.index)
+                                        else -> viewModel.openIncoming(photo.index)
+                                    }
                                 }
                         )
                     }
@@ -746,10 +771,12 @@ private fun BigCards(
                         useBands = true,
                         holdMs = 1500,
                         cropToFill = false,
-                        rejected = photo.verified == false,
+                        rejected = photo.stage == Stage.PARKED,
                         onFullyRevealed = { onRevealed(photo.index) },
-                        modifier = cardModifier.clickable(enabled = state.incoming.size > 2) {
-                            viewModel.closeIncoming(photo.index)   // tapping an opened tray photo closes it again
+                        modifier = cardModifier.clickable(enabled = state.incoming.size > 2 || photo.stage == Stage.PARKED) {
+                            // A damaged photo explains itself; otherwise tapping an opened tray photo closes it again
+                            if (photo.stage == Stage.PARKED) viewModel.explainDamaged(photo.index)
+                            else viewModel.closeIncoming(photo.index)
                         }
                     )
                 }
