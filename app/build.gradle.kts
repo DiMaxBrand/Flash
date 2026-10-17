@@ -12,8 +12,8 @@ android {
         applicationId = "com.example.flash"
         minSdk = 26
         targetSdk = 35
-        versionCode = 46
-        versionName = "0.10.0-expressive-session, Oct 17"
+        versionCode = 47
+        versionName = "0.10.1-save-toggle, Oct 17"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

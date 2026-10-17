@@ -913,6 +913,7 @@ private fun SettingsPanel(
     val themeMode by themeRepository.themeMode.collectAsStateWithLifecycle(ThemeMode.SYSTEM)
     val handshakeMode by themeRepository.handshakeMode.collectAsStateWithLifecycle(HandshakeMode.AUTO)
     val uiStyle by themeRepository.uiStyle.collectAsStateWithLifecycle(UiStyle.LIQUID)
+    val saveReceived by themeRepository.saveReceived.collectAsStateWithLifecycle(true)
 
     Box(
         modifier = modifier
@@ -1045,6 +1046,25 @@ private fun SettingsPanel(
                             UiStyle.EXPRESSIVE -> stringResource(R.string.ui_style_expressive)
                         }
                     }
+                )
+            }
+
+            HorizontalDivider(color = Color.White.copy(alpha = 0.15f))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text  = "Save received files to the phone",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = Color.White,
+                    modifier = Modifier.weight(1f)
+                )
+                androidx.compose.material3.Switch(
+                    checked = saveReceived,
+                    onCheckedChange = { scope.launch { themeRepository.setSaveReceived(it) } }
                 )
             }
 

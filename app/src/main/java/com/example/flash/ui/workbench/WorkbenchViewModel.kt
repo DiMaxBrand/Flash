@@ -160,6 +160,14 @@ class WorkbenchViewModel(
             .launchIn(viewModelScope)
     }
 
+    @Volatile private var saveReceived = true
+
+    init {
+        FlashApplication.instance.themeRepository.saveReceived
+            .onEach { saveReceived = it }
+            .launchIn(viewModelScope)
+    }
+
     private val verifyResults = java.util.concurrent.ConcurrentHashMap<Int, Boolean>()
     private val downloadedUris = java.util.concurrent.ConcurrentHashMap<Int, Uri>()
     private var metaReady = kotlinx.coroutines.CompletableDeferred<Boolean>()
@@ -613,6 +621,7 @@ class WorkbenchViewModel(
 
     /** Copies a received photo into MediaStore (Pictures/Flash). Android 10+ needs no permission. */
     private fun saveToGallery(file: File): Boolean {
+        if (!saveReceived) return false   // Settings > "Save received files to the phone" is off
         if (!file.exists() || !savedToGallery.add(file.absolutePath)) return false
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return saveToGalleryLegacy(file)
         return try {

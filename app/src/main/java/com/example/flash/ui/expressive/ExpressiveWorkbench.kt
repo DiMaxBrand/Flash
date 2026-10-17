@@ -56,12 +56,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.ToggleButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
@@ -586,6 +588,8 @@ private fun TrayTile(uri: android.net.Uri, progress: Float, rejected: Boolean = 
     }
 }
 
+/** An expressive connected button group: toggle buttons with rounded end caps that morph when selected. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun <T> ChoiceRow(
     title: String,
@@ -596,14 +600,24 @@ private fun <T> ChoiceRow(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(title, style = MaterialTheme.typography.titleMedium)
-        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween)
+        ) {
             items.forEachIndexed { index, item ->
-                SegmentedButton(
-                    selected = item == selected,
-                    onClick = { onSelect(item) },
-                    shape = SegmentedButtonDefaults.itemShape(index, items.size),
-                    label = { Text(label(item)) }
-                )
+                val shapes = when (index) {
+                    0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
+                    items.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
+                    else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
+                }
+                ToggleButton(
+                    checked = item == selected,
+                    onCheckedChange = { onSelect(item) },
+                    shapes = shapes,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(label(item), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
         }
     }
@@ -617,6 +631,7 @@ private fun SettingsContent(themeRepository: ThemeRepository, onOpenSimulation: 
     val handshake by themeRepository.handshakeMode.collectAsStateWithLifecycle(HandshakeMode.AUTO)
     val uiStyle by themeRepository.uiStyle.collectAsStateWithLifecycle(UiStyle.EXPRESSIVE)
     val language by themeRepository.language.collectAsStateWithLifecycle("")
+    val saveReceived by themeRepository.saveReceived.collectAsStateWithLifecycle(true)
 
     Column(
         modifier = Modifier
@@ -678,7 +693,19 @@ private fun SettingsContent(themeRepository: ThemeRepository, onOpenSimulation: 
             }
         )
 
-        androidx.compose.material3.TextButton(onClick = onOpenSimulation) { Text("Simulation…") }
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                "Save received files to the phone",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.weight(1f)
+            )
+            Switch(checked = saveReceived, onCheckedChange = { scope.launch { themeRepository.setSaveReceived(it) } })
+        }
+        androidx.compose.material3.FilledTonalButton(onClick = onOpenSimulation) { Text("Simulation…") }
 
         val versionText = remember {
             runCatching {

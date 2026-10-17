@@ -27,10 +27,19 @@ class ThemeRepository(private val dataStore: DataStore<Preferences>) {
         private val KEY_LANG    = stringPreferencesKey("language")
         private val KEY_HANDSHAKE = stringPreferencesKey("handshake_mode")
         private val KEY_UI_STYLE = stringPreferencesKey("ui_style")
+        private val KEY_SAVE_RECEIVED = booleanPreferencesKey("save_received")
     }
+
 
     private val preferences = dataStore.data.catch { error ->
         if (error is IOException) emit(emptyPreferences()) else throw error
+    }
+
+    /** Copy received pictures, videos and files into Pictures / Movies / Downloads (default on). */
+    val saveReceived: Flow<Boolean> = preferences.map { prefs -> prefs[KEY_SAVE_RECEIVED] ?: true }
+
+    suspend fun setSaveReceived(save: Boolean) {
+        dataStore.edit { it[KEY_SAVE_RECEIVED] = save }
     }
 
     val themeMode: Flow<ThemeMode> = preferences.map { prefs ->
