@@ -96,14 +96,16 @@ fun ShimmerBox(modifier: Modifier = Modifier) {
  * bands: they just wipe up once the original is complete and verified.
  */
 @Composable
-fun RevealCard(
+fun RevealContent(
     photo: IncomingPhoto,
     useBands: Boolean,
     holdMs: Long,
     cropToFill: Boolean,
     onFullyRevealed: () -> Unit,
     modifier: Modifier = Modifier,
-    rejected: Boolean = false
+    rejected: Boolean = false,
+    wipeStiffness: Float = 10f,
+    onWipe: (Float) -> Unit = {}
 ) {
     val ready = photo.ready
 
@@ -130,7 +132,7 @@ fun RevealCard(
         }
         // Original arrived mid-wipe: pause where we are, then carry on up using the original
         if (ready && wipe.value in 0.01f..0.99f) delay(180)
-        wipe.animateTo(target, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 10f))   // slow, no bounce
+        wipe.animateTo(target, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = wipeStiffness))   // slow, no bounce
     }
     LaunchedEffect(ready) {
         if (ready) {
@@ -140,7 +142,7 @@ fun RevealCard(
         }
     }
 
-    Box(modifier.clip(RoundedCornerShape(if (cropToFill) 28.dp else 32.dp))) {
+    Box(modifier) {
         val thumb = photo.thumb
         if (thumb == null) {
             ShimmerBox(Modifier.fillMaxSize())
@@ -192,6 +194,25 @@ fun RevealCard(
             Box(Modifier.fillMaxSize().background(Color.Red.copy(alpha = 0.5f)))
         }
     }
+}
+
+
+/** [RevealContent] clipped to a rounded card. */
+@Composable
+fun RevealCard(
+    photo: IncomingPhoto,
+    useBands: Boolean,
+    holdMs: Long,
+    cropToFill: Boolean,
+    onFullyRevealed: () -> Unit,
+    modifier: Modifier = Modifier,
+    rejected: Boolean = false
+) {
+    RevealContent(
+        photo = photo, useBands = useBands, holdMs = holdMs, cropToFill = cropToFill,
+        onFullyRevealed = onFullyRevealed, rejected = rejected,
+        modifier = modifier.clip(RoundedCornerShape(if (cropToFill) 28.dp else 32.dp))
+    )
 }
 
 /** Fits a card of the photo's aspect ratio into the available area (letterboxed, never cropped). */

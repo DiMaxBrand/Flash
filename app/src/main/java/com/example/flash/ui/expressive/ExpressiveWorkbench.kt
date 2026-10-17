@@ -172,7 +172,9 @@ fun ExpressiveWorkbench(
         else -> incoming.filter { it.open }
     }
     val bigSending: List<android.net.Uri> =
-        if (incoming.isEmpty() && !state.isReceiving && state.selectedPhotos.size in 1..2) state.selectedPhotos.toList()
+        // Only while the transfer is actually running: selecting photos must not take over the screen
+        // (the gallery stays scrollable so more photos can be picked)
+        if (incoming.isEmpty() && !state.isReceiving && state.sendProgress > 0f && state.selectedPhotos.size in 1..2) state.selectedPhotos.toList()
         else emptyList()
     val bigMode = bigIncoming.isNotEmpty() || bigSending.isNotEmpty()
 

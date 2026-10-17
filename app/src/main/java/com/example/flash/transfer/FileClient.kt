@@ -53,6 +53,7 @@ class FileClient {
         verifyScope: CoroutineScope,
         indices: List<Int> = (0 until fileCount).toList(),
         onProgress: (Float) -> Unit,
+        onFileDownloaded: (DownloadedFile) -> Unit = {},
         onFileVerified: (index: Int, isValid: Boolean) -> Unit
     ): List<DownloadedFile> {
         val progresses = HashMap<Int, Float>()
@@ -72,6 +73,14 @@ class FileClient {
                         }
                     }.onSuccess { downloaded ->
                         synchronized(lock) { results[index] = downloaded }
+                        // Each file is announced and verified the moment IT is complete, so the UI
+                        // can start on the first photo while the others are still downloading.
+                        onFileDownloaded(downloaded)
+                        verifyScope.launch(Dispatchers.IO) {
+                            val expected = downloaded.expectedChecksum
+                            val valid = expected == null || verifyChecksum(downloaded.file, expected)
+                            onFileVerified(downloaded.index, valid)
+                        }
                     }.onFailure { error ->
                         synchronized(lock) { if (firstError == null) firstError = error }
                     }
@@ -85,16 +94,16 @@ class FileClient {
         }
         onProgress(1f)
 
-        // Verify concurrently with the caller's animation; a file with no checksum header counts as valid
-        downloaded.forEach { file ->
-            verifyScope.launch(Dispatchers.IO) {
-                val expected = file.expectedChecksum
-                val valid = expected == null || verifyChecksum(file.file, expected)
-                onFileVerified(file.index, valid)
-            }
-        }
         return downloaded
     }
+
+    /** Downloads ONE file again and verifies it (used to retry a photo that failed its checksum). */
+    suspend fun downloadAndVerify(ip: String, port: Int, token: String, index: Int, destDir: File): Pair<DownloadedFile, Boolean>? =
+        runCatching {
+            val file = download(ip, port, token, index, destDir) {}
+            val expected = file.expectedChecksum
+            file to (expected == null || verifyChecksum(file.file, expected))
+        }.getOrNull()
 
     /** Asks the sender for photo sizes and tiny thumbnails; null if it is an older sender without previews. */
     suspend fun fetchMeta(ip: String, port: Int, token: String): List<FileMeta>? = runCatching {

@@ -79,6 +79,7 @@ class TransferRepository(
                                 _progressFlow.value = progress
                                 _transferState.value = TransferState.Downloading(progress)
                             },
+                            onFileDownloaded = { _fileDownloadedFlow.tryEmit(it) },
                             onFileVerified = { index, isValid ->
                                 _fileVerifiedFlow.tryEmit(index to isValid)
                             }
@@ -104,6 +105,20 @@ class TransferRepository(
             } catch (e: Exception) {
                 _transferState.value = TransferState.Failed(e.message ?: "Unknown error")
             }
+        }
+    }
+
+    /** Per-file download events, so the UI can react to the first photo while others still download. */
+    private val _fileDownloadedFlow = kotlinx.coroutines.flow.MutableSharedFlow<DownloadedFile>(extraBufferCapacity = 64)
+    val fileDownloadedFlow: kotlinx.coroutines.flow.SharedFlow<DownloadedFile> = _fileDownloadedFlow
+
+    /** Retry one damaged photo: download it again and verify. Does not touch the session's progress/state. */
+    suspend fun retryFile(ip: String, port: Int, token: String, index: Int, context: Context): Pair<DownloadedFile, Boolean>? {
+        val bound = LocalNetwork.bindProcessToWifi(context)
+        return try {
+            client.downloadAndVerify(ip, port, token, index, File(context.cacheDir, "transfers"))
+        } finally {
+            if (bound) LocalNetwork.unbind(context)
         }
     }
 

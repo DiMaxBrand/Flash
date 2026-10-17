@@ -63,7 +63,10 @@ fun MotherCore(
     cutoutOffset: Offset = Offset.Zero,
     backdrop: Backdrop? = null,
     accentColor: Color? = null,
+    accentAlpha: Float = 0.80f,
     viewfinderContent: (@Composable () -> Unit)? = null,
+    /** A photo materializing inside the core (clipped to the blob, above the colour, below the highlights). */
+    featuredContent: (@Composable () -> Unit)? = null,
     onAnimationComplete: () -> Unit = {}
 ) {
     val viewfinderActive = viewfinderContent != null
@@ -193,6 +196,18 @@ fun MotherCore(
         val specularShiftX = (sin(time * 0.00063 * PI) * baseRPx * 0.12f).toFloat()
         val specularShiftY = (cos(time * 0.00047 * PI) * baseRPx * 0.09f).toFloat()
 
+        // Tint (the sender's colour / lock-on colour): flat so the other phone's camera can read its hue
+        if (accentColor != null && accentAlpha > 0f) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                clipPath(blobPath) { drawRect(accentColor.copy(alpha = accentAlpha)) }
+            }
+        }
+
+        // A photo materializing inside the core, above the colour but under the glass highlights
+        if (featuredContent != null) {
+            Box(modifier = Modifier.fillMaxSize().clip(blobShape)) { featuredContent() }
+        }
+
         Canvas(modifier = Modifier.fillMaxSize()) {
             // ── Blob fill: radial gradient for 3D depth ───────────────────────
             val lightAqua = Color(0xFF80FFFF)   // top-left highlight
@@ -226,11 +241,6 @@ fun MotherCore(
             }
 
             clipPath(blobPath) {
-                // ── Accent color overlay (color detection lock-on) ─────────────
-                if (accentColor != null) {
-                    drawRect(accentColor.copy(alpha = 0.80f))  // flat colour so the camera can read its hue
-                }
-
                 if (!viewfinderActive) {
                 // ── Rim light: bright aqua glow on the bottom-right edge ──────
                 if (accentColor == null) drawCircle(

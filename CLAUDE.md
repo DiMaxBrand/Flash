@@ -475,3 +475,8 @@ A: Golden angle (137.5°) ensures each new photo lands in the largest empty gap,
 
 **Q: Why push directly to main via API instead of git push?**
 A: HTTP 403 blocks all git push attempts (even force push). GitHub API `push_files` tool bypasses this by committing directly to a branch. Used when normal git workflow is blocked by infrastructure issues.
+
+## Liquid receive session (0.9.4)
+
+When the sender's `/meta` is available the Liquid receiver runs a *session* (`WorkbenchUiState.liquidSession`; `legacyReceive` = old orbit flow for older senders). `WorkbenchViewModel.runLiquidSequence` drives it: photos 1-5 strictly one after another (`IncomingPhoto.tier` 0 for the first 3, 1 for 4-5), 6-10 concurrently by readiness (tier 2), 11+ instantly (tier 3). Stages: WAITING → FEATURED (revealed in the core via `MotherCore(featuredContent = LiquidFeatured)`, bands bottom-to-top over the sender colour) → FLYING (`FlightPhoto`, circle morphs to the rounded cell) → LANDED. UI is in `ui/workbench/LiquidSession.kt` (`LiquidSessionLayer`, drawn in the OUTER Box) plus the core scale (2×, finale overshoot 2.35× → 1) and grid slide in `WorkbenchScreen`. The session colour fades out over the camera view at the end (`accentAlpha`).
+Bad checksum: the photo parks in its grid cell (blurred, red; tap → explanation), retries itself up to 5 times (`parkDamaged`), is then shown crisp; if it still mismatches it is shown anyway and a final "couldn't be proved" dialog appears. The Expressive style still uses the older red-dialog flow for bad photos. Visual tuning of all of this was done blind (compile-checked only).

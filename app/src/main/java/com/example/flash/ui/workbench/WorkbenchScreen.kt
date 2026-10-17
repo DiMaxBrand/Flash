@@ -18,6 +18,8 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -364,6 +366,31 @@ fun WorkbenchScreen(
         }.toMap()
     }
 
+    // ── Liquid receive session: the core grows, the old grid slides away ──
+    val sessionOn = uiState.liquidSession
+    val coreScale = remember { Animatable(1f) }
+    val gridSlide = remember { Animatable(0f) }
+    val screenHeightPx = with(density) { LocalConfiguration.current.screenHeightDp.dp.toPx() }
+    LaunchedEffect(sessionOn) {
+        if (sessionOn) {
+            launch { gridSlide.animateTo(screenHeightPx, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 120f)) }
+            coreScale.animateTo(2f, spring(dampingRatio = 0.7f, stiffness = 90f))
+        } else if (coreScale.value > 1.01f || gridSlide.value > 0f) {
+            // Finale: the core zooms a little bigger, then settles back; the old photos slide up
+            launch {
+                delay(350)
+                gridSlide.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = 110f))
+            }
+            coreScale.animateTo(2.35f, spring(dampingRatio = 0.8f, stiffness = 300f))
+            coreScale.animateTo(1f, spring(dampingRatio = 0.55f, stiffness = 140f))
+        }
+    }
+    val accentFade by animateFloatAsState(
+        targetValue = if (uiState.sessionColor != null && !sessionOn) 0f else 0.80f,
+        animationSpec = tween(1200),
+        label = "accent_fade"
+    )
+
     val screenExitY = remember { Animatable(0f) }
     var screenExitStarted by remember { mutableStateOf(false) }
     LaunchedEffect(uiState.shouldExit) {
@@ -431,6 +458,7 @@ fun WorkbenchScreen(
             verticalArrangement   = Arrangement.spacedBy(4.dp),
             modifier = Modifier
                 .fillMaxSize()
+                .graphicsLayer { translationY = gridSlide.value }
                 .layerBackdrop(backdrop)
         ) {
             items(uiState.photos, key = { it.toString() }) { uri ->
@@ -622,6 +650,11 @@ fun WorkbenchScreen(
                 .align(Alignment.TopCenter)
                 .systemBarsPadding()
                 .graphicsLayer { translationY = -screenExitY.value }
+                .graphicsLayer {
+                    scaleX = coreScale.value
+                    scaleY = coreScale.value
+                    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f)
+                }
                 .onGloballyPositioned { coords ->
                     val pos = coords.positionInParent()
                     val sz  = coords.size
@@ -635,7 +668,7 @@ fun WorkbenchScreen(
             // once a sender has been discovered and its color is known.
             // Once the color is locked the camera is dropped and the core switches to that color.
             val viewfinderActive = cameraGranted && uiState.cameraHandshakeEnabled &&
-                uiState.selectedPhotos.isEmpty() && !uiState.isReceiving &&
+                uiState.selectedPhotos.isEmpty() && !uiState.isReceiving && !sessionOn &&
                 uiState.colorDetectionState != ColorDetectionState.Locked
             val viewfinderContent: (@Composable () -> Unit)? = if (viewfinderActive) {
                 {
@@ -659,9 +692,13 @@ fun WorkbenchScreen(
                 else -> null
             }
 
+            val featured = uiState.incoming.firstOrNull { it.index == uiState.featuredIndex && it.stage == Stage.FEATURED }
+            val liquidSessionOn = sessionOn || (uiState.incoming.isNotEmpty() && !uiState.legacyReceive)
             MotherCore(
-                progress     = uiState.transferProgress,
-                isReceiving  = uiState.isReceiving,
+                progress     = if (liquidSessionOn) 0f else uiState.transferProgress,
+                isReceiving  = uiState.isReceiving && !liquidSessionOn,
+                accentAlpha  = accentFade,
+                featuredContent = featured?.let { f -> { LiquidFeatured(f, viewModel) } },
                 shouldExit   = uiState.shouldExit,
                 cutoutOffset = cutoutOffset,
                 backdrop     = backdrop,
@@ -692,6 +729,15 @@ fun WorkbenchScreen(
                 )
             }
         }
+
+        // ── Liquid receive session: this session's photo cells, flights and notices ──
+        LiquidSessionLayer(
+            state = uiState,
+            viewModel = viewModel,
+            coreCenter = coreCenter,
+            coreSizePx = blobSizePx,
+            coreScale = coreScale.value
+        )
 
         // ── Status, errors and the scan popup: one column ABOVE everything else ──
         // Drawn after MotherCore and the "+" button, and kept in the free band between the

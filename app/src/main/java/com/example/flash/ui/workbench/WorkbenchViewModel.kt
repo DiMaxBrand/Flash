@@ -57,7 +57,12 @@ data class WorkbenchUiState(
     val receivedPhotos: List<Uri> = emptyList(),
     val receivingPhotos: List<Uri> = emptyList(),
     val corruptedPhotos: List<Uri> = emptyList(),
-    val incoming: List<IncomingPhoto> = emptyList(),   // photos on their way here (Expressive cards)
+    val incoming: List<IncomingPhoto> = emptyList(),   // photos on their way here (Expressive cards / Liquid session)
+    val liquidSession: Boolean = false,                 // the Liquid receive session is running (photos handled one by one)
+    val legacyReceive: Boolean = false,                 // the sender has no previews: old orbit flow
+    val featuredIndex: Int? = null,                     // the photo currently materializing inside the core
+    val explainIndex: Int? = null,                      // the user tapped a damaged photo
+    val unverifiedCount: Int = 0,                       // photos that could not be proven intact after retries
     val sessionColor: Int? = null,                   // the sender's colour, kept for the whole receive session
     val landingPhotos: Set<Uri> = emptySet(),        // good photos currently flying into the grid
     val rejectedPhotos: List<Uri> = emptyList(),     // failed their checksum: red, parked in the core
@@ -125,6 +130,14 @@ class WorkbenchViewModel(
             }
             .launchIn(viewModelScope)
 
+        transferRepository.fileDownloadedFlow
+            .onEach { file ->
+                val uri = Uri.fromFile(file.file)
+                downloadedUris[file.index] = uri
+                updateIncoming(file.index) { it.copy(originalUri = uri) }
+            }
+            .launchIn(viewModelScope)
+
         // Checksum verdicts arrive while the receiving animation plays; they are only recorded here
         // and acted on once the photos have orbited for ORBIT_MIN_MS (see settleReceivedPhotos).
         transferRepository.fileVerifiedFlow
@@ -136,6 +149,10 @@ class WorkbenchViewModel(
     }
 
     private val verifyResults = java.util.concurrent.ConcurrentHashMap<Int, Boolean>()
+    private val downloadedUris = java.util.concurrent.ConcurrentHashMap<Int, Uri>()
+    private var metaReady = kotlinx.coroutines.CompletableDeferred<Boolean>()
+    private var sequenceJob: kotlinx.coroutines.Job? = null
+    private val revealWaiters = java.util.concurrent.ConcurrentHashMap<Int, kotlinx.coroutines.CompletableDeferred<Unit>>()
 
     // ── Expressive cards: previews and bands fetched from the sender while the original downloads ──
     @Volatile private var holdLanding = false
@@ -159,25 +176,162 @@ class WorkbenchViewModel(
             val app = FlashApplication.instance
             val bound = LocalNetwork.bindProcessToWifi(app)
             try {
-                val meta = transferRepository.fetchMeta(handshake.ip, handshake.port, handshake.token) ?: return@launch
+                val meta = transferRepository.fetchMeta(handshake.ip, handshake.port, handshake.token)
+                if (meta == null) {
+                    // An older sender without previews: the old orbit flow takes over
+                    _uiState.update { it.copy(legacyReceive = true) }
+                    metaReady.complete(false)
+                    return@launch
+                }
                 val wanted = meta.filter { indices == null || it.index in indices }
+                val liquid = !holdLanding
                 val list = wanted.map { m ->
                     IncomingPhoto(
                         index = m.index, width = m.width, height = m.height,
                         previewWidth = m.previewWidth, previewHeight = m.previewHeight, bandCount = m.bandCount,
                         thumb = BitmapFactory.decodeByteArray(m.thumb, 0, m.thumb.size),
-                        open = wanted.size <= 2   // one or two photos are shown big right away
+                        // Expressive: one or two photos are shown big right away. Liquid: only the photo
+                        // currently starring in the core asks for bands.
+                        open = !liquid && wanted.size <= 2,
+                        // Whatever the original download has already reported
+                        originalUri = downloadedUris[m.index],
+                        verified = verifyResults[m.index]
                     )
                 }
-                // Keep whatever the original download has already reported
-                _uiState.update { it.copy(incoming = list) }
-                kotlinx.coroutines.coroutineScope {
-                    list.filter { it.open }.forEach { p -> launch { fetchBands(handshake, p) } }
+                _uiState.update { it.copy(incoming = list, legacyReceive = false, liquidSession = liquid) }
+                metaReady.complete(true)
+                if (liquid) {
+                    runLiquidSequence(handshake, list.map { it.index }.sorted())
+                } else {
+                    kotlinx.coroutines.coroutineScope {
+                        list.filter { it.open }.forEach { p -> launch { fetchBands(handshake, p) } }
+                    }
                 }
             } finally {
                 if (bound) LocalNetwork.unbind(app)
             }
         }
+    }
+
+    // ───────────────────────── Liquid receive session ─────────────────────────
+    // Photos are handled one by one, in order:
+    //   1-3  full animation (materialize in the core from the bands, then fly to their cell), sequential
+    //   4-5  the same, a bit faster, still sequential
+    //   6-10 faster and concurrent, by readiness; the first of them still shows briefly in the core
+    //   11+  just appear in their cell when ready
+    // A photo that fails its checksum is parked in its cell (blurred, red) and retries itself.
+
+    private fun photoOf(index: Int) = _uiState.value.incoming.firstOrNull { it.index == index }
+
+    private fun setStage(index: Int, stage: Stage) = updateIncoming(index) { it.copy(stage = stage) }
+
+    /** Waits until a photo's original is complete and its verdict is known. True = intact. */
+    private suspend fun awaitDecided(index: Int): Boolean {
+        var verdict: Boolean? = null
+        kotlinx.coroutines.withTimeoutOrNull(120_000) {
+            while (true) {
+                val p = photoOf(index)
+                if (p?.originalUri != null && p.verified != null) { verdict = p.verified; break }
+                delay(40)
+            }
+        }
+        return verdict == true
+    }
+
+    private suspend fun runLiquidSequence(handshake: PeerHandshake, order: List<Int>) {
+        order.forEachIndexed { pos, idx ->
+            val tier = when { pos < 3 -> 0; pos < 5 -> 1; pos < 10 -> 2; else -> 3 }
+            updateIncoming(idx) { it.copy(tier = tier) }
+        }
+        val rest = ArrayList<kotlinx.coroutines.Job>()
+        kotlinx.coroutines.coroutineScope {
+            // The stars: strictly one after the other
+            for ((pos, idx) in order.withIndex()) {
+                if (pos >= 5) break
+                if (!awaitDecided(idx)) { parkDamaged(handshake, idx); continue }
+                updateIncoming(idx) { it.copy(open = true) }
+                launch(Dispatchers.IO) { fetchBands(handshake, photoOf(idx) ?: return@launch) }
+                showInCore(idx)
+                delay(if (pos < 3) 450 else 250)   // let it clear the core before the next one starts
+            }
+            // The rest: concurrent, by readiness
+            order.drop(5).forEachIndexed { offset, idx ->
+                rest += launch {
+                    if (!awaitDecided(idx)) { parkDamaged(handshake, idx); return@launch }
+                    when {
+                        offset == 0 -> { showInCore(idx) }                   // still show the first of the batch
+                        offset < 5 -> setStage(idx, Stage.FLYING)              // quick flight from the core
+                        else -> setStage(idx, Stage.LANDED)                    // just appears
+                    }
+                }
+            }
+        }
+        rest.forEach { it.join() }
+        // Wait for flights to finish and retries to resolve
+        kotlinx.coroutines.withTimeoutOrNull(60_000) {
+            while (_uiState.value.incoming.any { it.stage != Stage.LANDED }) delay(100)
+        }
+        finishLiquidSession()
+    }
+
+    /** The photo materializes inside the core (UI) and reports back through [onFeaturedRevealed]. */
+    private suspend fun showInCore(index: Int) {
+        val waiter = kotlinx.coroutines.CompletableDeferred<Unit>()
+        revealWaiters[index] = waiter
+        setStage(index, Stage.FEATURED)
+        _uiState.update { it.copy(featuredIndex = index) }
+        kotlinx.coroutines.withTimeoutOrNull(60_000) { waiter.await() }
+        _uiState.update { it.copy(featuredIndex = null) }
+        setStage(index, Stage.FLYING)
+    }
+
+    fun onFeaturedRevealed(index: Int) { revealWaiters.remove(index)?.complete(Unit) }
+
+    /** The flying photo reached its cell. */
+    fun onFlightFinished(index: Int) = setStage(index, Stage.LANDED)
+
+    /** A photo failed its checksum: it waits in its cell (blurred, red) while it retries itself up to 5 times. */
+    private suspend fun parkDamaged(handshake: PeerHandshake, index: Int) {
+        setStage(index, Stage.PARKED)
+        val app = FlashApplication.instance
+        repeat(5) { attempt ->
+            updateIncoming(index) { it.copy(retries = attempt + 1) }
+            delay(700)
+            val result = transferRepository.retryFile(handshake.ip, handshake.port, handshake.token, index, app)
+            if (result != null) {
+                val (file, valid) = result
+                updateIncoming(index) { it.copy(originalUri = Uri.fromFile(file.file)) }
+                if (valid) {
+                    updateIncoming(index) { it.copy(verified = true, stage = Stage.LANDED) }
+                    return
+                }
+            }
+        }
+        // Still not provable: show it as received, flag it at the end
+        updateIncoming(index) { it.copy(unverifiable = true, stage = Stage.LANDED) }
+        _uiState.update { it.copy(unverifiedCount = it.unverifiedCount + 1) }
+    }
+
+    fun explainDamaged(index: Int) = _uiState.update { it.copy(explainIndex = index) }
+    fun dismissExplain() = _uiState.update { it.copy(explainIndex = null) }
+    fun dismissUnverified() = _uiState.update { it.copy(unverifiedCount = 0) }
+
+    private suspend fun finishLiquidSession() {
+        val uris = _uiState.value.incoming.sortedBy { it.index }.mapNotNull { it.originalUri }
+        viewModelScope.launch {
+            val saved = withContext(Dispatchers.IO) { uris.count { uri -> uri.path?.let { saveToGallery(File(it)) } == true } }
+            if (saved > 0) {
+                _uiState.update { it.copy(infoMessage = "Saved to Pictures/Flash in your gallery") }
+                delay(5000)
+                _uiState.update { it.copy(infoMessage = null) }
+            }
+        }
+        // The session ends: the UI plays its end animations (core springs back, colour fades to the camera)
+        _uiState.update { it.copy(photos = (uris + it.photos).distinct(), liquidSession = false, isReceiving = false, transferProgress = 0f) }
+        transferRepository.reset()
+        currentPort = 0
+        delay(1600)
+        _uiState.update { it.copy(incoming = emptyList(), sessionColor = null, featuredIndex = null) }
     }
 
     /** Fetches the bands a big card needs, bottom first. Photos that are not open never request any. */
@@ -584,6 +738,9 @@ class WorkbenchViewModel(
     fun startDownload(handshake: PeerHandshake, context: Context, indices: List<Int>? = null) {
         lastDownload = handshake
         verifyResults.clear()
+        downloadedUris.clear()
+        metaReady = kotlinx.coroutines.CompletableDeferred()
+        sequenceJob?.cancel()
         transferRepository.startDownload(handshake.ip, handshake.port, handshake.token, handshake.fileCount, context, indices)
         launchPreviews(handshake, indices)
         _uiState.update { it.copy(nfcState = NfcUiState.Transferring) }
@@ -591,7 +748,16 @@ class WorkbenchViewModel(
 
     private fun onTransferStateChanged(state: TransferState) {
         when (state) {
-            is TransferState.Complete -> {
+            is TransferState.Complete -> viewModelScope.launch {
+                // The preview meta decides which flow runs: the Liquid session sequencer (it already
+                // follows every file by itself) or the older orbit flow.
+                kotlinx.coroutines.withTimeoutOrNull(4000) { metaReady.await() }
+                if (_uiState.value.liquidSession) {
+                    _uiState.update {
+                        it.copy(nfcState = NfcUiState.Complete, transferProgress = 1f, showRipple = false)
+                    }
+                    return@launch
+                }
                 val uris = state.files.map { Uri.fromFile(it.file) }
                 val indices = state.files.map { it.index }
                 revealDone = false
