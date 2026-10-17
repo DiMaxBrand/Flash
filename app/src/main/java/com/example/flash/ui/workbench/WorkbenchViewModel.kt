@@ -327,7 +327,7 @@ class WorkbenchViewModel(
             }
         }
         // The session ends: the UI plays its end animations (core springs back, colour fades to the camera)
-        _uiState.update { it.copy(photos = (uris + it.photos).distinct(), liquidSession = false, isReceiving = false, transferProgress = 0f) }
+        _uiState.update { it.copy(photos = (uris + it.photos).distinct(), liquidSession = false, isReceiving = false, transferProgress = 0f, showRipple = true) }
         transferRepository.reset()
         currentPort = 0
         delay(1600)
@@ -375,7 +375,7 @@ class WorkbenchViewModel(
         if (state.selectedPhotos.isEmpty() || state.isReceiving) return
         currentPort = 0   // the next selection starts a fresh server and token
         viewModelScope.launch {
-            _uiState.update { it.copy(transferProgress = 1f, infoMessage = "Photos delivered") }
+            _uiState.update { it.copy(transferProgress = 1f, infoMessage = "Photos delivered", showRipple = true) }
             delay(2600)   // let the success pulse play
             _uiState.update {
                 it.copy(
@@ -807,7 +807,10 @@ class WorkbenchViewModel(
     fun onRippleComplete() {
         // The ripple is only decoration; the receive session ends when every photo has landed in
         // the grid or the rejected ones were dismissed (finishReceiveSession).
+        val s = _uiState.value
         _uiState.update { it.copy(showRipple = false) }
+        // Sending phone and Liquid sessions end through their own paths; only the old flow resets here
+        if (s.selectedPhotos.isNotEmpty() || s.liquidSession || (s.incoming.isNotEmpty() && !s.legacyReceive)) return
         transferRepository.reset()
         currentPort = 0
     }
