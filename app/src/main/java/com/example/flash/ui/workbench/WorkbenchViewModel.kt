@@ -878,6 +878,7 @@ class WorkbenchViewModel(
 
     fun startSimulation(role: SimRole, speed: SimSpeed, count: Int, damage: SimDamage, content: SimContent) {
         stopSimulation()
+        lastDownload = null   // never retry against a handshake left over from a real transfer
         simSpeed = speed
         simDamage = damage
         simJob = viewModelScope.launch {
@@ -980,6 +981,27 @@ class WorkbenchViewModel(
         launch { photos.filter { it.kind == MediaKind.IMAGE }.forEach { fetch(it) } }
         photos.filter { it.kind != MediaKind.IMAGE }.forEach { launch { fetch(it) } }
     }.also { _uiState.update { it.copy(transferProgress = 1f, nfcState = NfcUiState.Complete) } }
+
+    /** Expressive "Retry" in the simulation: no network, the "re-download" succeeds or fails again per the damage option. */
+    private fun simRetryDamaged() {
+        val indices = failedIndices
+        val bad = _uiState.value.rejectedPhotos
+        failedIndices = emptyList()
+        _uiState.update { it.copy(corruptedPhotos = emptyList(), rejectedPhotos = emptyList(), isReceiving = true) }
+        viewModelScope.launch {
+            delay(if (simSpeed == SimSpeed.SLOW) 1500L else 400L)
+            if (simDamage == SimDamage.RECOVERS) {
+                indices.forEach { i ->
+                    verifyResults[i] = true
+                    updateIncoming(i) { it.copy(verified = true) }
+                }
+                _uiState.update { it.copy(photos = (bad + it.photos).distinct(), landingPhotos = bad.toSet()) }
+            } else {
+                failedIndices = indices
+                _uiState.update { it.copy(rejectedPhotos = bad, corruptedPhotos = bad) }
+            }
+        }
+    }
 
     /** Bands of a photo arrive bottom first, quickly on a fast network and visibly on a slow one. */
     private suspend fun simFeedBands(photo: IncomingPhoto) {
@@ -1105,6 +1127,7 @@ class WorkbenchViewModel(
 
     /** "Retry": download only the damaged files again from the sender (its server stays up for a minute). */
     fun retryCorruptedPhotos(context: Context) {
+        if (simActive) { simRetryDamaged(); return }
         val handshake = lastDownload
         val indices = failedIndices
         if (handshake == null || indices.isEmpty()) {

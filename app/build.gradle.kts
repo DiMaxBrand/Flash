@@ -12,8 +12,8 @@ android {
         applicationId = "com.example.flash"
         minSdk = 26
         targetSdk = 35
-        versionCode = 43
-        versionName = "0.9.8-sim-media, Oct 17"
+        versionCode = 44
+        versionName = "0.9.9-sim-retry-fix, Oct 17"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
