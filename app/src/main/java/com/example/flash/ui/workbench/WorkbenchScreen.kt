@@ -504,7 +504,10 @@ fun WorkbenchScreen(
 
         // ── Update Wi-Fi status periodically ────────────────────────────────────
         LaunchedEffect(Unit) {
-            viewModel.updateWifiStatus(context)
+            while (true) {
+                viewModel.updateWifiStatus(context)
+                delay(1500)
+            }
         }
 
         // ── Hotspot prompt modal ────────────────────────────────────────────────
@@ -647,6 +650,20 @@ fun WorkbenchScreen(
                 )
             }
 
+            uiState.infoMessage?.let { info ->
+                androidx.compose.material3.Text(
+                    text = info,
+                    color = androidx.compose.ui.graphics.Color.White,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier
+                        .background(
+                            androidx.compose.ui.graphics.Color(0xFF1F5C3A).copy(alpha = 0.92f),
+                            RoundedCornerShape(16.dp)
+                        )
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                )
+            }
+
             // ── Scan complete popup (springs up above buttons) ────────────────────
             val showScanPopup = uiState.colorDetectionState == ColorDetectionState.Locked
             val scanPopupColor = uiState.detectedPeerColor?.displayColor
@@ -726,6 +743,7 @@ private fun SettingsPanel(
     modifier: Modifier = Modifier
 ) {
     val scope     = rememberCoroutineScope()
+    val context   = LocalContext.current
     val themeMode by themeRepository.themeMode.collectAsStateWithLifecycle(ThemeMode.SYSTEM)
     val handshakeMode by themeRepository.handshakeMode.collectAsStateWithLifecycle(HandshakeMode.AUTO)
 
@@ -837,6 +855,18 @@ private fun SettingsPanel(
                     }
                 )
             }
+
+            val versionText = remember {
+                runCatching {
+                    val info = context.packageManager.getPackageInfo(context.packageName, 0)
+                    "Flash ${info.versionName} (build ${info.longVersionCode})"
+                }.getOrDefault("Flash")
+            }
+            Text(
+                text  = versionText,
+                style = MaterialTheme.typography.labelSmall,
+                color = Color.White.copy(alpha = 0.6f)
+            )
 
             Spacer(Modifier.height(8.dp))
         }

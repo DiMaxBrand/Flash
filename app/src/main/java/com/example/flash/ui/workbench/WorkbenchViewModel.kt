@@ -1,13 +1,22 @@
 package com.example.flash.ui.workbench
 
 import android.content.ContentUris
+import android.content.ContentValues
 import android.content.Context
+import android.graphics.BitmapFactory
+import android.os.Build
+import android.os.Environment
+import com.example.flash.util.LocalNetwork
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.net.URLConnection
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
 import android.provider.MediaStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.flash.FlashApplication
 import com.example.flash.handshake.CameraHandshakeManager
 import com.example.flash.handshake.ColorHandshake
 import com.example.flash.nfc.NfcManager
@@ -56,7 +65,8 @@ data class WorkbenchUiState(
     val colorDetectionState: ColorDetectionState = ColorDetectionState.Idle,
     val detectionStrength: Float = 0f,
     val cameraHandshakeEnabled: Boolean = false,
-    val transferError: String? = null
+    val transferError: String? = null,
+    val infoMessage: String? = null
 )
 
 private const val LOCK_DISPLAY_MS = 3500L
@@ -117,6 +127,15 @@ class WorkbenchViewModel(
                 val photoUri = allReceiving[index]
                 viewModelScope.launch {
                     delay(100)
+                    // Keep a copy in the phone's gallery (the app's own copy lives in the cache,
+                    // which Android may clear). The in-app Uri is left alone so the orbit doesn't pop.
+                    val saved = withContext(Dispatchers.IO) {
+                        photoUri.path?.let { saveToGallery(File(it)) } == true
+                    }
+                    if (saved) {
+                        _uiState.update { it.copy(infoMessage = "Saved to Pictures/Flash in your gallery") }
+                        launch { delay(5000); _uiState.update { it.copy(infoMessage = null) } }
+                    }
                     _uiState.update { state ->
                         state.copy(
                             photos = (state.photos + photoUri).distinct(),
@@ -128,28 +147,74 @@ class WorkbenchViewModel(
         }
     }
 
-    private fun isWifiConnected(context: Context): Boolean {
-        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-            ?: return false
-        val network = connectivityManager.activeNetwork ?: return false
-        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
-        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
-    }
+    /**
+     * True when this phone is on a local network another phone could reach: joined to Wi-Fi
+     * (even with a VPN on top) or hosting a hotspot. Polled by the screen, so the prompt
+     * follows Wi-Fi / hotspot changes instead of showing stale state.
+     */
+    private fun hasLocalNetwork(context: Context): Boolean = LocalNetwork.localIpv4(context) != null
+
+    private var hotspotPromptDismissed = false
+    private val savedToGallery = mutableSetOf<String>()
 
     fun updateWifiStatus(context: Context) {
-        val connected = isWifiConnected(context)
-        _uiState.update { it.copy(isWifiConnected = connected) }
+        val connected = hasLocalNetwork(context)
+        if (connected) hotspotPromptDismissed = false   // ask again next time it drops
+        if (connected != _uiState.value.isWifiConnected) {
+            _uiState.update { it.copy(isWifiConnected = connected) }
+        }
         checkHotspotPromptVisibility()
     }
 
     private fun checkHotspotPromptVisibility() {
         val state = _uiState.value
-        val shouldShow = state.selectedPhotos.isNotEmpty() && !state.isWifiConnected && !state.isReceiving
-        _uiState.update { it.copy(showHotspotPrompt = shouldShow) }
+        val shouldShow = state.selectedPhotos.isNotEmpty() && !state.isWifiConnected &&
+            !state.isReceiving && !hotspotPromptDismissed
+        if (shouldShow != state.showHotspotPrompt) {
+            _uiState.update { it.copy(showHotspotPrompt = shouldShow) }
+        }
     }
 
     fun dismissHotspotPrompt() {
+        hotspotPromptDismissed = true
         _uiState.update { it.copy(showHotspotPrompt = false) }
+    }
+
+    /** Copies a received photo into MediaStore (Pictures/Flash). Android 10+ needs no permission. */
+    private fun saveToGallery(file: File): Boolean {
+        if (!file.exists() || !savedToGallery.add(file.absolutePath)) return false
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false   // would need WRITE_EXTERNAL_STORAGE
+        return try {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(file.absolutePath, bounds)
+            val originalName = file.name.replaceFirst(Regex("^\\d+_"), "")
+            val mime = bounds.outMimeType
+                ?: URLConnection.guessContentTypeFromName(originalName)
+                ?: "image/jpeg"
+            val ext = when (mime) { "image/png" -> "png"; "image/webp" -> "webp"; "image/heic" -> "heic"; else -> "jpg" }
+            val name = if (originalName.contains('.')) originalName else "$originalName.$ext"
+            val resolver = FlashApplication.instance.contentResolver
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, name)
+                put(MediaStore.Images.Media.MIME_TYPE, mime)
+                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Flash")
+                put(MediaStore.Images.Media.IS_PENDING, 1)
+            }
+            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return false
+            try {
+                resolver.openOutputStream(uri)?.use { out -> file.inputStream().use { it.copyTo(out) } }
+                    ?: throw java.io.IOException("no output stream")
+                values.clear()
+                values.put(MediaStore.Images.Media.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+                true
+            } catch (e: Exception) {
+                resolver.delete(uri, null, null)
+                false
+            }
+        } catch (e: Exception) {
+            false
+        }
     }
 
     fun loadGalleryPhotos(context: Context) {

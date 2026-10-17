@@ -365,6 +365,12 @@ Settings has a **Pairing method** row (`HandshakeMode`: AUTO / NFC / CAMERA, sto
 - CAMERA: NFC foreground dispatch and outbound NFC handshake off
 - `WorkbenchViewModel.applyHandshakeMode(nfc, camera)` applies it; the sender tints its own MotherCore with its advertised `displayColor` so the receiver's camera has something to find.
 
+## Received Files & Hotspot Prompt
+
+- Downloads land in `cacheDir/transfers/` (Android may clear it). After each file passes its checksum, `WorkbenchViewModel.saveToGallery()` copies it into MediaStore `Pictures/Flash` (Android 10+, no permission; older Android keeps it in cache only) and a green "Saved to Pictures/Flash" message shows. The in-app Uri is left as the cache file on purpose so the orbit doesn't swap items.
+- The "No Wi-Fi?" hotspot dialog is driven by `updateWifiStatus()`, polled every 1.5 s from `WorkbenchScreen`. "Connected" = `LocalNetwork.localIpv4() != null` (joined to Wi-Fi, even under a VPN, or hosting a hotspot). Dismissing it keeps it dismissed until a connection is seen and lost again.
+- Settings shows `Flash <versionName> (build <versionCode>)` so a screenshot/recording can be matched to a release.
+
 ## Network Corruption Detection & Recovery
 
 **Files**: `FileServer.kt`, `FileClient.kt`, `TransferRepository.kt`
