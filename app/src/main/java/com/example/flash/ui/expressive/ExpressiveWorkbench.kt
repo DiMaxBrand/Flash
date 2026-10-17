@@ -160,6 +160,7 @@ fun ExpressiveWorkbench(
     }
 
     var showSettings by remember { mutableStateOf(false) }
+    var showSimulation by remember { mutableStateOf(false) }
     val viewfinderActive = cameraGranted && state.cameraHandshakeEnabled &&
         state.selectedPhotos.isEmpty() && !state.isReceiving &&
         state.colorDetectionState != ColorDetectionState.Locked
@@ -358,8 +359,11 @@ fun ExpressiveWorkbench(
         }
         if (showSettings) {
             ModalBottomSheet(onDismissRequest = { showSettings = false }) {
-                SettingsContent(themeRepository)
+                SettingsContent(themeRepository, onOpenSimulation = { showSimulation = true })
             }
+        }
+        if (showSimulation) {
+            com.example.flash.ui.workbench.SimulationDialog(viewModel, onDismiss = { showSimulation = false; showSettings = false })
         }
     }
 }
@@ -576,7 +580,7 @@ private fun <T> ChoiceRow(
 }
 
 @Composable
-private fun SettingsContent(themeRepository: ThemeRepository) {
+private fun SettingsContent(themeRepository: ThemeRepository, onOpenSimulation: () -> Unit) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val themeMode by themeRepository.themeMode.collectAsStateWithLifecycle(ThemeMode.SYSTEM)
@@ -643,6 +647,8 @@ private fun SettingsContent(themeRepository: ThemeRepository) {
                 }
             }
         )
+
+        androidx.compose.material3.TextButton(onClick = onOpenSimulation) { Text("Simulation…") }
 
         val versionText = remember {
             runCatching {

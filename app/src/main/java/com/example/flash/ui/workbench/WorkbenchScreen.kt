@@ -406,6 +406,11 @@ fun WorkbenchScreen(
     // Close settings panel on back press
     BackHandler(enabled = showSettings) { showSettings = false }
 
+    var showSimulation by remember { mutableStateOf(false) }
+    if (showSimulation) {
+        SimulationDialog(viewModel, onDismiss = { showSimulation = false; showSettings = false })
+    }
+
     val photoPicker      = rememberPhotoPicker { uris -> viewModel.onPhotosSelected(uris, context) }
 
     // ── Interface style: the Material 3 Expressive layout replaces the whole liquid UI ──
@@ -572,6 +577,7 @@ fun WorkbenchScreen(
                         themeRepository = app.themeRepository,
                         backdrop        = backdrop,
                         onClose         = { showSettings = false },
+                        onOpenSimulation = { showSimulation = true },
                         modifier        = Modifier
                             .fillMaxWidth()
                             .sharedBounds(
@@ -892,6 +898,7 @@ private fun SettingsPanel(
     themeRepository: ThemeRepository,
     backdrop: Backdrop,
     onClose: () -> Unit,
+    onOpenSimulation: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val scope     = rememberCoroutineScope()
@@ -1033,6 +1040,15 @@ private fun SettingsPanel(
                     }
                 )
             }
+
+            HorizontalDivider(color = Color.White.copy(alpha = 0.15f))
+
+            Text(
+                text  = "Simulation…",
+                style = MaterialTheme.typography.bodyLarge,
+                color = Color.White,
+                modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenSimulation)
+            )
 
             val versionText = remember {
                 runCatching {

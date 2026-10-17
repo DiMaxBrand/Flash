@@ -21,6 +21,7 @@ import com.example.flash.handshake.CameraHandshakeManager
 import com.example.flash.handshake.ColorHandshake
 import com.example.flash.nfc.NfcManager
 import com.example.flash.nfc.PeerHandshake
+import com.example.flash.transfer.DownloadedFile
 import com.example.flash.transfer.TransferRepository
 import com.example.flash.transfer.TransferState
 import kotlinx.coroutines.Dispatchers
@@ -293,6 +294,7 @@ class WorkbenchViewModel(
     /** A photo failed its checksum: it waits in its cell (blurred, red) while it retries itself up to 5 times. */
     private suspend fun parkDamaged(handshake: PeerHandshake, index: Int) {
         setStage(index, Stage.PARKED)
+        if (simActive) { simRetry(index); return }
         val app = FlashApplication.instance
         repeat(5) { attempt ->
             updateIncoming(index) { it.copy(retries = attempt + 1) }
@@ -318,8 +320,9 @@ class WorkbenchViewModel(
 
     private suspend fun finishLiquidSession() {
         val uris = _uiState.value.incoming.sortedBy { it.index }.mapNotNull { it.originalUri }
+        val sim = simActive   // simulated photos never go to the real gallery
         viewModelScope.launch {
-            val saved = withContext(Dispatchers.IO) { uris.count { uri -> uri.path?.let { saveToGallery(File(it)) } == true } }
+            val saved = if (sim) 0 else withContext(Dispatchers.IO) { uris.count { uri -> uri.path?.let { saveToGallery(File(it)) } == true } }
             if (saved > 0) {
                 _uiState.update { it.copy(infoMessage = "Saved to Pictures/Flash in your gallery") }
                 delay(5000)
@@ -336,6 +339,7 @@ class WorkbenchViewModel(
 
     /** Fetches the bands a big card needs, bottom first. Photos that are not open never request any. */
     private suspend fun fetchBands(handshake: PeerHandshake, photo: IncomingPhoto) {
+        if (simActive) { simFeedBands(photo); return }
         val bandHeight = (photo.previewHeight + photo.bandCount - 1) / photo.bandCount
         for (n in 0 until photo.bandCount) {
             val have = _uiState.value.incoming.firstOrNull { it.index == photo.index }?.bands?.containsKey(n) == true
@@ -420,7 +424,7 @@ class WorkbenchViewModel(
             // Space opens in the grid (animated) while the photos fly in; copies go to the gallery
             _uiState.update { it.copy(photos = (good + it.photos).distinct(), landingPhotos = good.toSet()) }
             viewModelScope.launch {
-                val saved = withContext(Dispatchers.IO) {
+                val saved = if (simActive) 0 else withContext(Dispatchers.IO) {
                     good.count { uri -> uri.path?.let { saveToGallery(File(it)) } == true }
                 }
                 if (saved > 0) {
@@ -737,6 +741,7 @@ class WorkbenchViewModel(
 
     fun startDownload(handshake: PeerHandshake, context: Context, indices: List<Int>? = null) {
         lastDownload = handshake
+        simActive = false
         verifyResults.clear()
         downloadedUris.clear()
         metaReady = kotlinx.coroutines.CompletableDeferred()
@@ -758,26 +763,7 @@ class WorkbenchViewModel(
                     }
                     return@launch
                 }
-                val uris = state.files.map { Uri.fromFile(it.file) }
-                val indices = state.files.map { it.index }
-                revealDone = false
-                _uiState.update {
-                    it.copy(
-                        incoming = it.incoming.map { p ->
-                            val file = state.files.firstOrNull { f -> f.index == p.index }
-                            if (file != null) p.copy(originalUri = Uri.fromFile(file.file)) else p
-                        },
-                        nfcState = NfcUiState.Complete,
-                        transferProgress = 1f,
-                        showRipple = true,
-                        receivingPhotos = uris,
-                        landingPhotos = emptySet(),
-                        rejectedPhotos = emptyList(),
-                        corruptedPhotos = emptyList()
-                    )
-                }
-                receiveJob?.cancel()
-                receiveJob = viewModelScope.launch { settleReceivedPhotos(uris, indices) }
+                enterSettle(state.files)
             }
             is TransferState.Failed -> {
                 _uiState.update {
@@ -802,6 +788,188 @@ class WorkbenchViewModel(
             }
             else -> {}
         }
+    }
+
+    // ───────────────────────── Simulation (Settings > Simulation) ─────────────────────────
+    // Makes this phone act as a sender or a receiver without a second phone: generated pictures go
+    // through the real UI state paths (incoming photos, bands, checksum verdicts, sender progress),
+    // with delays that imitate a fast or a slow network. Nothing touches the network or the gallery.
+
+    @Volatile private var simActive = false
+    @Volatile private var simSpeed = SimSpeed.FAST
+    @Volatile private var simDamage = SimDamage.NONE
+    private var simJob: kotlinx.coroutines.Job? = null
+    private var simPhotos: Map<Int, SimPhoto> = emptyMap()
+    private var simUris: Set<Uri> = emptySet()
+
+    val simulationRunning: Boolean get() = simJob?.isActive == true
+
+    fun startSimulation(role: SimRole, speed: SimSpeed, count: Int, damage: SimDamage) {
+        stopSimulation()
+        simSpeed = speed
+        simDamage = damage
+        simJob = viewModelScope.launch {
+            if (role == SimRole.RECEIVER) simReceive(count) else simSend(count)
+        }
+    }
+
+    fun stopSimulation() {
+        simJob?.cancel()
+        simJob = null
+        if (!simActive) return
+        simActive = false
+        val gone = simUris
+        simUris = emptySet()
+        _uiState.update {
+            it.copy(
+                incoming = emptyList(), liquidSession = false, isReceiving = false, sessionColor = null,
+                featuredIndex = null, explainIndex = null, unverifiedCount = 0, transferProgress = 0f,
+                sendProgress = 0f, receivingPhotos = emptyList(), landingPhotos = emptySet(),
+                selectedPhotos = it.selectedPhotos - gone, photos = it.photos - gone, infoMessage = null
+            )
+        }
+    }
+
+    private val simPerFileMs get() = if (simSpeed == SimSpeed.SLOW) 1000L else 60L
+
+    private suspend fun simReceive(count: Int) {
+        val app = FlashApplication.instance
+        val photos = withContext(Dispatchers.Default) { SimImages.generate(app, count) }
+        simPhotos = photos.associateBy { it.index }
+        simActive = true
+        verifyResults.clear()
+        downloadedUris.clear()
+        revealDone = false
+        val liquid = !holdLanding
+        val list = photos.map { p ->
+            IncomingPhoto(
+                index = p.index, width = p.width, height = p.height,
+                previewWidth = p.preview.width, previewHeight = p.preview.height, bandCount = 6,
+                thumb = p.thumb, open = !liquid && count <= 2
+            )
+        }
+        metaReady = kotlinx.coroutines.CompletableDeferred<Boolean>().also { it.complete(true) }
+        val dummy = PeerHandshake("0.0.0.0", 0, "sim", "en", count)
+        _uiState.update {
+            it.copy(
+                incoming = list, legacyReceive = false, liquidSession = liquid, isReceiving = true,
+                sessionColor = android.graphics.Color.HSVToColor(floatArrayOf(200f, 0.65f, 0.95f)),
+                nfcState = NfcUiState.Transferring, transferProgress = 0f, unverifiedCount = 0,
+                landingPhotos = emptySet(), rejectedPhotos = emptyList(), corruptedPhotos = emptyList()
+            )
+        }
+        kotlinx.coroutines.coroutineScope {
+            val download = launch { simDownload(photos) }
+            if (liquid) {
+                runLiquidSequence(dummy, list.map { it.index })
+            } else {
+                list.filter { it.open }.forEach { p -> launch { fetchBands(dummy, p) } }
+                download.join()
+                enterSettle(photos.map { DownloadedFile(it.index, it.file, null) })
+            }
+        }
+    }
+
+    /** Files arrive one after another; the second one is damaged when the damage option asks for it. */
+    private suspend fun simDownload(photos: List<SimPhoto>) {
+        val damagedIndex = if (simDamage != SimDamage.NONE) minOf(1, photos.size - 1) else -1
+        for ((i, p) in photos.withIndex()) {
+            val steps = (simPerFileMs / 50).toInt().coerceAtLeast(1)
+            repeat(steps) { s ->
+                delay(simPerFileMs / steps)
+                _uiState.update { it.copy(transferProgress = (i + (s + 1f) / steps) / photos.size) }
+            }
+            val uri = Uri.fromFile(p.file)
+            downloadedUris[p.index] = uri
+            updateIncoming(p.index) { it.copy(originalUri = uri) }
+            val valid = p.index != damagedIndex
+            verifyResults[p.index] = valid
+            updateIncoming(p.index) { it.copy(verified = valid) }
+        }
+        _uiState.update { it.copy(transferProgress = 1f, nfcState = NfcUiState.Complete) }
+    }
+
+    /** Bands of a photo arrive bottom first, quickly on a fast network and visibly on a slow one. */
+    private suspend fun simFeedBands(photo: IncomingPhoto) {
+        val sp = simPhotos[photo.index] ?: return
+        val bandHeight = (photo.previewHeight + photo.bandCount - 1) / photo.bandCount
+        for (n in 0 until photo.bandCount) {
+            delay(if (simSpeed == SimSpeed.SLOW) 150L else 15L)
+            val yBottom = photo.previewHeight - n * bandHeight
+            val yTop = maxOf(0, yBottom - bandHeight)
+            if (yBottom <= yTop) break
+            val crop = android.graphics.Bitmap.createBitmap(sp.preview, 0, yTop, sp.preview.width, yBottom - yTop)
+            updateIncoming(photo.index) { it.copy(bands = it.bands + (n to BandImage(n, yTop, yBottom - yTop, crop))) }
+        }
+    }
+
+    /** Retries of a damaged photo: fixed on the second attempt, or never, depending on the damage option. */
+    private suspend fun simRetry(index: Int) {
+        repeat(5) { attempt ->
+            updateIncoming(index) { it.copy(retries = attempt + 1) }
+            delay(if (simSpeed == SimSpeed.SLOW) 1000L else 700L)
+            if (simDamage == SimDamage.RECOVERS && attempt >= 1) {
+                verifyResults[index] = true
+                updateIncoming(index) { it.copy(verified = true, stage = Stage.LANDED) }
+                return
+            }
+        }
+        updateIncoming(index) { it.copy(unverifiable = true, stage = Stage.LANDED) }
+        _uiState.update { it.copy(unverifiedCount = it.unverifiedCount + 1) }
+    }
+
+    /** This phone acts as the sender: photos orbit the core, progress fills in at network speed, then "delivered". */
+    private suspend fun simSend(count: Int) {
+        val app = FlashApplication.instance
+        val photos = withContext(Dispatchers.Default) { SimImages.generate(app, count) }
+        simPhotos = photos.associateBy { it.index }
+        simActive = true
+        val uris = photos.map { Uri.fromFile(it.file) }
+        simUris = uris.toSet()
+        _uiState.update {
+            it.copy(
+                photos = (uris + it.photos).distinct(), selectedPhotos = it.selectedPhotos + uris,
+                sendProgress = 0f, transferProgress = 0f, isReceiving = false
+            )
+        }
+        delay(2500)   // the other phone "touches" now
+        val total = maxOf(600L, photos.size * simPerFileMs)
+        val tick = 40L
+        var t = 0L
+        while (t < total) {
+            delay(tick)
+            t += tick
+            _uiState.update { it.copy(sendProgress = (t.toFloat() / total).coerceAtMost(1f)) }
+        }
+        onAllFilesDelivered()
+        delay(8000)
+        simUris = emptySet()
+        simActive = false
+        _uiState.update { it.copy(photos = it.photos - uris.toSet()) }
+    }
+
+    /** The older receiving flow (orbit, or the Expressive cards): all files are in, settle them into the grid. */
+    private fun enterSettle(files: List<DownloadedFile>) {
+        val uris = files.map { Uri.fromFile(it.file) }
+        val indices = files.map { it.index }
+        revealDone = false
+        _uiState.update {
+            it.copy(
+                incoming = it.incoming.map { p ->
+                    val file = files.firstOrNull { f -> f.index == p.index }
+                    if (file != null) p.copy(originalUri = Uri.fromFile(file.file)) else p
+                },
+                nfcState = NfcUiState.Complete,
+                transferProgress = 1f,
+                showRipple = true,
+                receivingPhotos = uris,
+                landingPhotos = emptySet(),
+                rejectedPhotos = emptyList(),
+                corruptedPhotos = emptyList()
+            )
+        }
+        receiveJob?.cancel()
+        receiveJob = viewModelScope.launch { settleReceivedPhotos(uris, indices) }
     }
 
     fun onRippleComplete() {
