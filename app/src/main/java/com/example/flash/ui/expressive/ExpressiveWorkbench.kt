@@ -99,6 +99,7 @@ import com.example.flash.ui.theme.ThemeRepository
 import com.example.flash.ui.theme.UiStyle
 import com.example.flash.ui.workbench.ColorDetectionState
 import com.example.flash.ui.workbench.IncomingPhoto
+import com.example.flash.ui.workbench.MediaImage
 import com.example.flash.ui.workbench.WorkbenchUiState
 import com.example.flash.ui.workbench.WorkbenchViewModel
 import kotlinx.coroutines.delay
@@ -121,7 +122,7 @@ fun ExpressiveWorkbench(
     missingPermissions: Boolean,
     onRequestPermissions: () -> Unit,
     cameraGranted: Boolean,
-    onAddPhotos: () -> Unit
+    picker: com.example.flash.ui.workbench.PhotoPickerState
 ) {
     val context = LocalContext.current
     val themeMode by themeRepository.themeMode.collectAsStateWithLifecycle(ThemeMode.SYSTEM)
@@ -215,8 +216,12 @@ fun ExpressiveWorkbench(
                         }
                     },
                     floatingActionButton = {
-                        FloatingActionButton(onClick = onAddPhotos) {
-                            Icon(Icons.Default.Add, contentDescription = stringResource(R.string.cd_add_photos))
+                        var addMenu by remember { mutableStateOf(false) }
+                        Box {
+                            FloatingActionButton(onClick = { addMenu = true }) {
+                                Icon(Icons.Default.Add, contentDescription = stringResource(R.string.cd_add_photos))
+                            }
+                            com.example.flash.ui.workbench.AddMenu(addMenu, { addMenu = false }, picker)
                         }
                     }
                 )
@@ -509,7 +514,7 @@ private fun TrayTile(uri: android.net.Uri, progress: Float, rejected: Boolean = 
             .clip(RoundedCornerShape(28.dp))
             .clickable(onClick = onClick)
     ) {
-        AsyncImage(
+        MediaImage(
             model = uri,
             contentDescription = null,
             contentScale = ContentScale.Crop,
@@ -688,7 +693,7 @@ private fun PhotoGridArea(state: WorkbenchUiState, viewModel: WorkbenchViewModel
                                         else viewModel.onPhotoAddedToOrbit(uri, context)
                                     }
                             ) {
-                                AsyncImage(
+                                MediaImage(
                                     model = uri,
                                     contentDescription = null,
                                     contentScale = ContentScale.Crop,

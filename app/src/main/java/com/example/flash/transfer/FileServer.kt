@@ -15,6 +15,7 @@ import io.ktor.server.response.respondOutputStream
 import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import java.io.OutputStream
 import java.net.ServerSocket
 import java.security.MessageDigest
@@ -38,12 +39,41 @@ class FileServer(private val scope: CoroutineScope) {
     private var server: EmbeddedServer<CIOApplicationEngine, CIOApplicationEngine.Configuration>? = null
     private val entries = CopyOnWriteArrayList<Pair<String, Uri>>()
     private var appContext: Context? = null
-    private val checksumCache = mutableMapOf<String, String>()
+    private val checksumCache = ConcurrentHashMap<String, String>()
+
+    /** SHA-256 of a served file (cached). Big videos take a moment, so hashing starts when a file is added. */
+    private fun checksumOf(key: String, uri: Uri): String = checksumCache.getOrPut(key) {
+        val digest = MessageDigest.getInstance("SHA-256")
+        appContext!!.contentResolver.openInputStream(uri)?.use { input ->
+            val buffer = ByteArray(64 * 1024)
+            var count: Int
+            while (input.read(buffer).also { count = it } > 0) {
+                digest.update(buffer, 0, count)
+            }
+        }
+        digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    private fun prehash(token: String, index: Int, uri: Uri) {
+        scope.launch(Dispatchers.IO) { runCatching { checksumOf("$token/$index", uri) } }
+    }
 
     // ── Display previews: a tiny blurred thumbnail plus the photo in horizontal bands ──────────
     // The receiver shows these while the untouched original is still downloading. Bands are
     // numbered from the BOTTOM of the picture (0 = bottom) so it can be revealed bottom-to-top.
-    private class PreviewMeta(val index: Int, val width: Int, val height: Int, val pw: Int, val ph: Int, val thumb: ByteArray)
+    private class PreviewMeta(
+        val index: Int, val width: Int, val height: Int, val pw: Int, val ph: Int, val thumb: ByteArray,
+        val kind: String = "image", val name: String = "", val size: Long = 0L, val mime: String = ""
+    )
+
+    private val posterCache = ConcurrentHashMap<Int, Bitmap>()
+
+    private fun fileSizeOf(uri: Uri): Long =
+        runCatching { appContext!!.contentResolver.openFileDescriptor(uri, "r")?.use { it.statSize } ?: 0L }.getOrDefault(0L)
+
+    /** First frame of a video (long side <= PREVIEW_WIDTH), cached. */
+    private fun posterOf(index: Int, uri: Uri): Bitmap? =
+        posterCache[index] ?: com.example.flash.ui.workbench.videoPoster(appContext!!, uri, PREVIEW_WIDTH)?.also { posterCache[index] = it }
 
     private val metaCache = ConcurrentHashMap<Int, PreviewMeta>()
     private val bandCache = ConcurrentHashMap<Int, List<ByteArray>>()
@@ -82,6 +112,27 @@ class FileServer(private val scope: CoroutineScope) {
 
     private fun buildMeta(index: Int): PreviewMeta? = metaCache[index] ?: runCatching {
         val uri = entries.getOrNull(index)?.second ?: return null
+        val mime = appContext!!.contentResolver.getType(uri) ?: "application/octet-stream"
+        val name = com.example.flash.ui.workbench.displayName(appContext!!, uri)
+        val size = fileSizeOf(uri)
+        val mediaKind = com.example.flash.ui.workbench.kindOfMime(mime)
+        // Anything that is not a picture is announced with its name; videos also get a first-frame poster
+        if (mediaKind != com.example.flash.ui.workbench.MediaKind.IMAGE) {
+            val poster = if (mediaKind == com.example.flash.ui.workbench.MediaKind.VIDEO) posterOf(index, uri) else null
+            if (poster == null) {
+                return PreviewMeta(index, 1, 1, 1, 1, ByteArray(0), "file", name, size, mime).also { metaCache[index] = it }
+            }
+            val tw = 32
+            val th = (tw.toFloat() * poster.height / poster.width).toInt().coerceAtLeast(1)
+            val out = ByteArrayOutputStream()
+            Bitmap.createScaledBitmap(poster, tw, th, true).compress(Bitmap.CompressFormat.JPEG, 45, out)
+            val scale = minOf(1f, PREVIEW_WIDTH.toFloat() / poster.width)
+            return PreviewMeta(
+                index, poster.width, poster.height,
+                (poster.width * scale).toInt().coerceAtLeast(1), (poster.height * scale).toInt().coerceAtLeast(1),
+                out.toByteArray(), "video", name, size, mime
+            ).also { metaCache[index] = it }
+        }
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         appContext!!.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
@@ -102,15 +153,20 @@ class FileServer(private val scope: CoroutineScope) {
         val tiny = Bitmap.createScaledBitmap(small, tw, th, true)
         val out = ByteArrayOutputStream()
         tiny.compress(Bitmap.CompressFormat.JPEG, 45, out)
-        PreviewMeta(index, w, h, pw, ph, out.toByteArray()).also { metaCache[index] = it }
+        PreviewMeta(index, w, h, pw, ph, out.toByteArray(), "image", name, size, mime).also { metaCache[index] = it }
     }.getOrNull()
 
     private fun buildBands(index: Int): List<ByteArray>? = bandCache[index] ?: runCatching {
         val meta = buildMeta(index) ?: return null
+        if (meta.kind == "file") return emptyList()
         val uri = entries[index].second
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        appContext!!.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
-        val upright = decodeUpright(uri, maxOf(meta.pw, meta.ph), exifOrientation(uri), bounds) ?: return null
+        val upright = if (meta.kind == "video") {
+            posterOf(index, uri) ?: return null
+        } else {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            appContext!!.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+            decodeUpright(uri, maxOf(meta.pw, meta.ph), exifOrientation(uri), bounds) ?: return null
+        }
         val preview = Bitmap.createScaledBitmap(upright, meta.pw, meta.ph, true)
         val bandHeight = (meta.ph + BAND_COUNT - 1) / BAND_COUNT
         val bands = ArrayList<ByteArray>()
@@ -197,6 +253,7 @@ class FileServer(private val scope: CoroutineScope) {
         resetDelivery()
         appContext = context.applicationContext
         uris.forEach { entries.add(token to it) }
+        uris.forEachIndexed { i, u -> prehash(token, i, u) }
         refreshTotalBytes()
         port = findFreePort()
         server = embeddedServer(CIO, port = port) {
@@ -214,7 +271,9 @@ class FileServer(private val scope: CoroutineScope) {
                             val meta = buildMeta(i) ?: continue
                             files.put(JSONObject().apply {
                                 put("i", i); put("w", meta.width); put("h", meta.height)
-                                put("pw", meta.pw); put("ph", meta.ph); put("bands", BAND_COUNT)
+                                put("pw", meta.pw); put("ph", meta.ph)
+                                put("bands", if (meta.kind == "file") 0 else BAND_COUNT)
+                                put("kind", meta.kind); put("name", meta.name); put("size", meta.size); put("mime", meta.mime)
                                 put("thumb", Base64.encodeToString(meta.thumb, Base64.NO_WRAP))
                             })
                         }
@@ -250,21 +309,12 @@ class FileServer(private val scope: CoroutineScope) {
                     val fileUri = entry.second
                     val cr = appContext!!.contentResolver
                     val mimeType = cr.getType(fileUri) ?: "application/octet-stream"
-                    val fileName = fileUri.lastPathSegment ?: "file"
+                    val fileName = com.example.flash.ui.workbench.displayName(appContext!!, fileUri)
+                        .map { if (it.code in 32..126 && it != '"' && it != '\\' && it != '/') it else '_' }.joinToString("")
                     val fileSize = cr.openFileDescriptor(fileUri, "r")?.use { it.statSize } ?: 0L
 
                     val cacheKey = "$token/$index"
-                    val hash = checksumCache.getOrPut(cacheKey) {
-                        val digest = MessageDigest.getInstance("SHA-256")
-                        cr.openInputStream(fileUri)?.use { input ->
-                            val buffer = ByteArray(8192)
-                            var count: Int
-                            while (input.read(buffer).also { count = it } > 0) {
-                                digest.update(buffer, 0, count)
-                            }
-                        }
-                        digest.digest().joinToString("") { "%02x".format(it) }
-                    }
+                    val hash = checksumOf(cacheKey, fileUri)
 
                     val input = cr.openInputStream(fileUri)
                     if (input == null) {
@@ -296,6 +346,7 @@ class FileServer(private val scope: CoroutineScope) {
 
     fun addUri(token: String, uri: Uri) {
         entries.add(token to uri)
+        prehash(token, entries.size - 1, uri)
         refreshTotalBytes()
         allDeliveredFired = false   // a new file is waiting; report again when everything is out
     }
@@ -308,6 +359,7 @@ class FileServer(private val scope: CoroutineScope) {
     fun stop() {
         metaCache.clear()
         bandCache.clear()
+        posterCache.clear()
         server?.stop(gracePeriodMillis = 500, timeoutMillis = 1000)
         server = null
         port = 0

@@ -40,7 +40,10 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.example.flash.ui.workbench.FileTile
 import com.example.flash.ui.workbench.IncomingPhoto
+import com.example.flash.ui.workbench.MediaImage
+import com.example.flash.ui.workbench.MediaKind
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlin.math.roundToInt
@@ -109,6 +112,24 @@ fun RevealContent(
 ) {
     val ready = photo.ready
 
+    // A file has nothing to reveal: its tile is shown at once and counts as revealed when it is complete
+    if (photo.kind == MediaKind.FILE) {
+        LaunchedEffect(ready) {
+            if (ready) {
+                delay(holdMs)
+                onFullyRevealed()
+            }
+        }
+        Box(modifier) {
+            FileTile(photo.name, video = false, modifier = Modifier.fillMaxSize())
+            if (rejected) Box(Modifier.fillMaxSize().background(Color.Red.copy(alpha = 0.5f)))
+        }
+        return
+    }
+    // A video is shown by its first frame (the bands) only; the video itself is never decoded here
+    val isVideo = photo.kind == MediaKind.VIDEO
+    val useBands = useBands || isVideo
+
     // How far up the bands reach: contiguous bands from the bottom, as a fraction of the height
     val bandLevel = remember(photo.bands, photo.previewHeight) {
         var sum = 0
@@ -126,7 +147,7 @@ fun RevealContent(
     }
     LaunchedEffect(ready, bandLevel, useBands) {
         val target = when {
-            ready -> 1f
+            ready && !isVideo -> 1f
             useBands -> bandLevel
             else -> 0f
         }
@@ -180,7 +201,7 @@ fun RevealContent(
                 }
             }
             val original = photo.originalUri
-            if (original != null) {
+            if (original != null && !isVideo) {
                 AsyncImage(
                     model = original,
                     contentDescription = null,
@@ -229,7 +250,7 @@ fun FittedCard(aspect: Float, modifier: Modifier = Modifier, content: @Composabl
 @Composable
 fun SendCard(uri: Uri, progress: Float, modifier: Modifier = Modifier) {
     Box(modifier.clip(RoundedCornerShape(32.dp))) {
-        AsyncImage(
+        MediaImage(
             model = uri,
             contentDescription = null,
             contentScale = ContentScale.Crop,

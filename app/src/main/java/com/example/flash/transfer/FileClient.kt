@@ -3,6 +3,8 @@ package com.example.flash.transfer
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.HttpTimeoutConfig
+import io.ktor.client.plugins.timeout
 import io.ktor.client.request.get
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsChannel
@@ -23,7 +25,9 @@ import java.security.MessageDigest
 class FileMeta(
     val index: Int, val width: Int, val height: Int,
     val previewWidth: Int, val previewHeight: Int, val bandCount: Int,
-    val thumb: ByteArray
+    val thumb: ByteArray,
+    /** "image", "video" or "file" (an older sender sends none: everything is an image). */
+    val kind: String = "image", val name: String = "", val size: Long = 0L, val mime: String = ""
 )
 
 /** A file saved by [FileClient.download]; [index] is its position on the sender. */
@@ -54,6 +58,7 @@ class FileClient {
         indices: List<Int> = (0 until fileCount).toList(),
         onProgress: (Float) -> Unit,
         onFileDownloaded: (DownloadedFile) -> Unit = {},
+        onFileProgress: (index: Int, progress: Float) -> Unit = { _, _ -> },
         onFileVerified: (index: Int, isValid: Boolean) -> Unit
     ): List<DownloadedFile> {
         val progresses = HashMap<Int, Float>()
@@ -66,6 +71,7 @@ class FileClient {
                 launch {
                     runCatching {
                         download(ip, port, token, index, destDir) { progress ->
+                            onFileProgress(index, progress)
                             synchronized(lock) {
                                 progresses[index] = progress
                                 onProgress(indices.sumOf { (progresses[it] ?: 0f).toDouble() }.toFloat() / indices.size)
@@ -115,7 +121,9 @@ class FileClient {
             FileMeta(
                 index = o.getInt("i"), width = o.getInt("w"), height = o.getInt("h"),
                 previewWidth = o.getInt("pw"), previewHeight = o.getInt("ph"), bandCount = o.getInt("bands"),
-                thumb = android.util.Base64.decode(o.getString("thumb"), android.util.Base64.DEFAULT)
+                thumb = android.util.Base64.decode(o.getString("thumb"), android.util.Base64.DEFAULT),
+                kind = o.optString("kind", "image"), name = o.optString("name", ""),
+                size = o.optLong("size", 0L), mime = o.optString("mime", "")
             )
         }
     }.getOrNull()
@@ -137,7 +145,13 @@ class FileClient {
     ): DownloadedFile {
         destDir.mkdirs()
 
-        val response: HttpResponse = client.get("http://$ip:$port/transfer/$token/$index")
+        // Videos and big files take as long as they take: no overall limit, only a stall limit
+        val response: HttpResponse = client.get("http://$ip:$port/transfer/$token/$index") {
+            timeout {
+                requestTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
+                socketTimeoutMillis = 60_000
+            }
+        }
 
         if (!response.status.isSuccess()) {
             throw IOException("Transfer failed: HTTP ${response.status.value}")
@@ -156,7 +170,7 @@ class FileClient {
         }
 
         val channel = response.bodyAsChannel()
-        val buffer = ByteArray(8192)
+        val buffer = ByteArray(64 * 1024)
         var bytesRead = 0L
 
         dest.outputStream().use { out ->

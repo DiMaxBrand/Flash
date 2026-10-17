@@ -135,7 +135,17 @@ class WorkbenchViewModel(
             .onEach { file ->
                 val uri = Uri.fromFile(file.file)
                 downloadedUris[file.index] = uri
-                updateIncoming(file.index) { it.copy(originalUri = uri) }
+                updateIncoming(file.index) { it.copy(originalUri = uri, progress = 1f) }
+                registerReceived(file.index)
+            }
+            .launchIn(viewModelScope)
+
+        transferRepository.fileProgressFlow
+            .onEach { (index, p) ->
+                val cur = photoOf(index)
+                if (cur != null && cur.kind != MediaKind.IMAGE && p - cur.progress >= 0.01f) {
+                    updateIncoming(index) { it.copy(progress = p) }
+                }
             }
             .launchIn(viewModelScope)
 
@@ -193,7 +203,10 @@ class WorkbenchViewModel(
                         thumb = BitmapFactory.decodeByteArray(m.thumb, 0, m.thumb.size),
                         // Expressive: one or two photos are shown big right away. Liquid: only the photo
                         // currently starring in the core asks for bands.
-                        open = !liquid && wanted.size <= 2,
+                        // A video's poster comes through the bands whatever the style.
+                        open = (!liquid && wanted.size <= 2) || (m.kind == "video" && m.bandCount > 0),
+                        kind = when (m.kind) { "video" -> MediaKind.VIDEO; "file" -> MediaKind.FILE; else -> MediaKind.IMAGE },
+                        name = m.name, size = m.size,
                         // Whatever the original download has already reported
                         originalUri = downloadedUris[m.index],
                         verified = verifyResults[m.index]
@@ -224,12 +237,19 @@ class WorkbenchViewModel(
 
     private fun photoOf(index: Int) = _uiState.value.incoming.firstOrNull { it.index == index }
 
+    /** Tells grid cells and the orbit how to draw a received video or file (a picture needs no entry). */
+    private fun registerReceived(index: Int) {
+        val p = photoOf(index) ?: return
+        val uri = p.originalUri ?: return
+        if (p.kind != MediaKind.IMAGE) MediaRegistry.infos[uri] = MediaInfo(p.kind, p.name, p.poster)
+    }
+
     private fun setStage(index: Int, stage: Stage) = updateIncoming(index) { it.copy(stage = stage) }
 
     /** Waits until a photo's original is complete and its verdict is known. True = intact. */
-    private suspend fun awaitDecided(index: Int): Boolean {
+    private suspend fun awaitDecided(index: Int, timeoutMs: Long = 120_000): Boolean {
         var verdict: Boolean? = null
-        kotlinx.coroutines.withTimeoutOrNull(120_000) {
+        kotlinx.coroutines.withTimeoutOrNull(timeoutMs) {
             while (true) {
                 val p = photoOf(index)
                 if (p?.originalUri != null && p.verified != null) { verdict = p.verified; break }
@@ -239,13 +259,27 @@ class WorkbenchViewModel(
         return verdict == true
     }
 
-    private suspend fun runLiquidSequence(handshake: PeerHandshake, order: List<Int>) {
+    /** A video or file: its cell shows at once (first frame / tile) with a progress ring while the real download runs. */
+    private suspend fun runMedia(handshake: PeerHandshake, idx: Int) {
+        val p = photoOf(idx) ?: return
+        updateIncoming(idx) { it.copy(tier = 3) }
+        if (p.kind == MediaKind.VIDEO) fetchBands(handshake, p)
+        setStage(idx, Stage.LANDED)
+        // Big videos take as long as they take; only a damaged result needs the retry path
+        if (!awaitDecided(idx, 30 * 60_000L)) parkDamaged(handshake, idx)
+    }
+
+    private suspend fun runLiquidSequence(handshake: PeerHandshake, allOrder: List<Int>) {
+        // Pictures run the animated sequence; videos and files take their own quiet path
+        val kinds = _uiState.value.incoming.associate { it.index to it.kind }
+        val order = allOrder.filter { kinds[it] == MediaKind.IMAGE }
         order.forEachIndexed { pos, idx ->
             val tier = when { pos < 3 -> 0; pos < 5 -> 1; pos < 10 -> 2; else -> 3 }
             updateIncoming(idx) { it.copy(tier = tier) }
         }
         val rest = ArrayList<kotlinx.coroutines.Job>()
         kotlinx.coroutines.coroutineScope {
+            allOrder.filter { kinds[it] != MediaKind.IMAGE }.forEach { idx -> rest += launch { runMedia(handshake, idx) } }
             // The stars: strictly one after the other
             for ((pos, idx) in order.withIndex()) {
                 if (pos >= 5) break
@@ -324,7 +358,7 @@ class WorkbenchViewModel(
         viewModelScope.launch {
             val saved = if (sim) 0 else withContext(Dispatchers.IO) { uris.count { uri -> uri.path?.let { saveToGallery(File(it)) } == true } }
             if (saved > 0) {
-                _uiState.update { it.copy(infoMessage = "Saved to Pictures/Flash in your gallery") }
+                _uiState.update { it.copy(infoMessage = "Saved to the Flash folder (Pictures, Movies or Downloads)") }
                 delay(5000)
                 _uiState.update { it.copy(infoMessage = null) }
             }
@@ -350,6 +384,18 @@ class WorkbenchViewModel(
             val yTop = maxOf(0, yBottom - bandHeight)
             updateIncoming(photo.index) { it.copy(bands = it.bands + (n to BandImage(n, yTop, yBottom - yTop, bitmap))) }
         }
+        if (photo.kind == MediaKind.VIDEO) composePoster(photo.index)
+    }
+
+    /** Joins a video's bands into one first-frame picture for grid cells and the orbit. */
+    private fun composePoster(index: Int) {
+        val p = photoOf(index) ?: return
+        if (p.poster != null || p.bands.isEmpty() || p.previewWidth <= 0 || p.previewHeight <= 0) return
+        val poster = android.graphics.Bitmap.createBitmap(p.previewWidth, p.previewHeight, android.graphics.Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(poster)
+        p.bands.values.forEach { canvas.drawBitmap(it.bitmap, 0f, it.y.toFloat(), null) }
+        updateIncoming(index) { it.copy(poster = poster) }
+        registerReceived(index)
     }
 
     /** Tapping a tray photo opens it big; only now are its bands requested. */
@@ -428,7 +474,7 @@ class WorkbenchViewModel(
                     good.count { uri -> uri.path?.let { saveToGallery(File(it)) } == true }
                 }
                 if (saved > 0) {
-                    _uiState.update { it.copy(infoMessage = "Saved to Pictures/Flash in your gallery") }
+                    _uiState.update { it.copy(infoMessage = "Saved to the Flash folder (Pictures, Movies or Downloads)") }
                     delay(5000)
                     _uiState.update { it.copy(infoMessage = null) }
                 }
@@ -501,7 +547,12 @@ class WorkbenchViewModel(
         if (!granted) {
             false
         } else {
-            val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "Flash")
+            val folder = when (kindOfFile(file)) {
+                MediaKind.IMAGE -> Environment.DIRECTORY_PICTURES
+                MediaKind.VIDEO -> Environment.DIRECTORY_MOVIES
+                MediaKind.FILE -> Environment.DIRECTORY_DOWNLOADS
+            }
+            val dir = File(Environment.getExternalStoragePublicDirectory(folder), "Flash")
             dir.mkdirs()
             val name = file.name.replaceFirst(Regex("^\\d+_"), "")
             var target = File(dir, name)
@@ -520,27 +571,34 @@ class WorkbenchViewModel(
         if (!file.exists() || !savedToGallery.add(file.absolutePath)) return false
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return saveToGalleryLegacy(file)
         return try {
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeFile(file.absolutePath, bounds)
             val originalName = file.name.replaceFirst(Regex("^\\d+_"), "")
-            val mime = bounds.outMimeType
-                ?: URLConnection.guessContentTypeFromName(originalName)
-                ?: "image/jpeg"
-            val ext = when (mime) { "image/png" -> "png"; "image/webp" -> "webp"; "image/heic" -> "heic"; else -> "jpg" }
-            val name = if (originalName.contains('.')) originalName else "$originalName.$ext"
+            val guessed = mimeOfName(originalName) ?: URLConnection.guessContentTypeFromName(originalName)
+            val kind = kindOfMime(guessed)
+            // Pictures: look at the bytes (the name may lack an extension). Videos and files: trust the name.
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            if (kind == MediaKind.IMAGE || guessed == null) BitmapFactory.decodeFile(file.absolutePath, bounds)
+            val mime = bounds.outMimeType ?: guessed ?: "application/octet-stream"
+            val saveKind = kindOfMime(mime)
+            val ext = when (mime) { "image/png" -> "png"; "image/webp" -> "webp"; "image/heic" -> "heic"; "image/jpeg" -> "jpg"; else -> "" }
+            val name = if (originalName.contains('.') || ext.isEmpty()) originalName else "$originalName.$ext"
             val resolver = FlashApplication.instance.contentResolver
-            val values = ContentValues().apply {
-                put(MediaStore.Images.Media.DISPLAY_NAME, name)
-                put(MediaStore.Images.Media.MIME_TYPE, mime)
-                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Flash")
-                put(MediaStore.Images.Media.IS_PENDING, 1)
+            val (collection, folder) = when (saveKind) {
+                MediaKind.IMAGE -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI to Environment.DIRECTORY_PICTURES
+                MediaKind.VIDEO -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI to Environment.DIRECTORY_MOVIES
+                MediaKind.FILE -> MediaStore.Downloads.EXTERNAL_CONTENT_URI to Environment.DIRECTORY_DOWNLOADS
             }
-            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return false
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+                put(MediaStore.MediaColumns.MIME_TYPE, mime)
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "$folder/Flash")
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+            val uri = resolver.insert(collection, values) ?: return false
             try {
                 resolver.openOutputStream(uri)?.use { out -> file.inputStream().use { it.copyTo(out) } }
                     ?: throw java.io.IOException("no output stream")
                 values.clear()
-                values.put(MediaStore.Images.Media.IS_PENDING, 0)
+                values.put(MediaStore.MediaColumns.IS_PENDING, 0)
                 resolver.update(uri, values, null, null)
                 true
             } catch (e: Exception) {
@@ -572,6 +630,20 @@ class WorkbenchViewModel(
                 }
             }
             _uiState.update { it.copy(photos = photos) }
+        }
+    }
+
+    /** Videos and other files from the "+" menu: note their kind, name and (videos) a first-frame poster, then send like photos. */
+    fun onMediaSelected(uris: List<Uri>, context: Context) {
+        val app = context.applicationContext
+        viewModelScope.launch(Dispatchers.IO) {
+            uris.forEach { uri ->
+                val kind = kindOfMime(app.contentResolver.getType(uri))
+                if (kind != MediaKind.IMAGE) {
+                    MediaRegistry.infos[uri] = MediaInfo(kind, displayName(app, uri), if (kind == MediaKind.VIDEO) videoPoster(app, uri, 360) else null)
+                }
+            }
+            onPhotosSelected(uris, context)
         }
     }
 

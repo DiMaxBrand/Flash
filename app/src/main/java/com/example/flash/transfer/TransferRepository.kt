@@ -80,6 +80,7 @@ class TransferRepository(
                                 _transferState.value = TransferState.Downloading(progress)
                             },
                             onFileDownloaded = { _fileDownloadedFlow.tryEmit(it) },
+                            onFileProgress = { i, p -> _fileProgressFlow.tryEmit(i to p) },
                             onFileVerified = { index, isValid ->
                                 _fileVerifiedFlow.tryEmit(index to isValid)
                             }
@@ -107,6 +108,12 @@ class TransferRepository(
             }
         }
     }
+
+    /** Per-file download progress (index to 0..1), for big videos and files; old values are dropped when nobody keeps up. */
+    private val _fileProgressFlow = kotlinx.coroutines.flow.MutableSharedFlow<Pair<Int, Float>>(
+        extraBufferCapacity = 128, onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST
+    )
+    val fileProgressFlow: kotlinx.coroutines.flow.SharedFlow<Pair<Int, Float>> = _fileProgressFlow
 
     /** Per-file download events, so the UI can react to the first photo while others still download. */
     private val _fileDownloadedFlow = kotlinx.coroutines.flow.MutableSharedFlow<DownloadedFile>(extraBufferCapacity = 64)

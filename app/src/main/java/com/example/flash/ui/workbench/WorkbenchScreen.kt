@@ -411,7 +411,11 @@ fun WorkbenchScreen(
         SimulationDialog(viewModel, onDismiss = { showSimulation = false; showSettings = false })
     }
 
-    val photoPicker      = rememberPhotoPicker { uris -> viewModel.onPhotosSelected(uris, context) }
+    val photoPicker      = rememberPhotoPicker(
+        onPhotos = { uris -> viewModel.onPhotosSelected(uris, context) },
+        onMedia  = { uris -> viewModel.onMediaSelected(uris, context) }
+    )
+    var showAddMenu by remember { mutableStateOf(false) }
 
     // ── Interface style: the Material 3 Expressive layout replaces the whole liquid UI ──
     val uiStyle by app.themeRepository.uiStyle.collectAsStateWithLifecycle(UiStyle.LIQUID)
@@ -429,7 +433,7 @@ fun WorkbenchScreen(
             missingPermissions = missingPairingPermissions().isNotEmpty(),
             onRequestPermissions = { requestPairingPermissions() },
             cameraGranted = cameraGranted,
-            onAddPhotos = { photoPicker.launch() }
+            picker = photoPicker
         )
         return
     }
@@ -600,16 +604,19 @@ fun WorkbenchScreen(
                 .align(Alignment.BottomEnd)
                 .padding(end = 24.dp, bottom = 88.dp)
         ) {
-            LiquidButton(
-                onClick      = { photoPicker.launch() },
-                backdrop     = backdrop,
-                surfaceColor = OceanAqua.copy(alpha = 0.30f),
-            ) {
-                Icon(
-                    Icons.Default.Add,
-                    contentDescription = stringResource(R.string.cd_add_photos),
-                    tint = Color.White
-                )
+            Box {
+                LiquidButton(
+                    onClick      = { showAddMenu = true },
+                    backdrop     = backdrop,
+                    surfaceColor = OceanAqua.copy(alpha = 0.30f),
+                ) {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = stringResource(R.string.cd_add_photos),
+                        tint = Color.White
+                    )
+                }
+                AddMenu(expanded = showAddMenu, onDismiss = { showAddMenu = false }, picker = photoPicker)
             }
         }
 
@@ -1106,7 +1113,7 @@ private fun ReceivedPhotoMaterializeFlyer(
     val photoSizeDp = 56.dp
     val photoSizePx = with(density) { photoSizeDp.toPx() }
 
-    AsyncImage(
+    MediaImage(
         model = uri,
         contentDescription = null,
         contentScale = ContentScale.Crop,
@@ -1168,7 +1175,7 @@ private fun ReceivedPhotoOrbitToGalleryFlyer(
     val x = lerp(orbitX, targetX, progress)
     val y = lerp(orbitY, targetY, progress)
 
-    AsyncImage(
+    MediaImage(
         model = uri,
         contentDescription = null,
         contentScale = ContentScale.Crop,
@@ -1238,7 +1245,7 @@ private fun ReceivedPhotoFlyer(
     val x = lerp(clearX, targetX, flightPhase)
     val y = lerp(coreCenter.y, targetY, flightPhase)
 
-    AsyncImage(
+    MediaImage(
         model = uri,
         contentDescription = null,
         contentScale = ContentScale.Crop,
@@ -1283,7 +1290,7 @@ private fun PhotoGridItem(
             .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onTap)
     ) {
-        AsyncImage(
+        MediaImage(
             model              = uri,
             contentDescription = null,
             contentScale       = ContentScale.Crop,
@@ -1383,7 +1390,7 @@ private fun CorruptionAlert(
                                     .clip(androidx.compose.foundation.shape.CircleShape)
                                     .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f))
                             ) {
-                                AsyncImage(
+                                MediaImage(
                                     model = uri,
                                     contentDescription = null,
                                     contentScale = ContentScale.Crop,

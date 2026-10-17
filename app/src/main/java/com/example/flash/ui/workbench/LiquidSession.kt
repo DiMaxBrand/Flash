@@ -27,6 +27,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
@@ -188,22 +189,44 @@ private fun SessionCell(photo: IncomingPhoto, modifier: Modifier, onTap: () -> U
     Box(modifier.clip(shape).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f))) {
         if (alpha > 0f) {
             Box(Modifier.fillMaxSize().alpha(alpha)) {
-                photo.thumb?.let {
-                    Image(
-                        bitmap = it.asImageBitmap(), contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize().blur(14.dp)
+                if (photo.kind == MediaKind.FILE) {
+                    FileTile(photo.name, video = false, modifier = Modifier.fillMaxSize())
+                } else {
+                    photo.thumb?.let {
+                        Image(
+                            bitmap = it.asImageBitmap(), contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize().blur(14.dp)
+                        )
+                    }
+                    if (photo.kind == MediaKind.VIDEO) {
+                        photo.poster?.let {
+                            Image(
+                                bitmap = it.asImageBitmap(), contentDescription = null,
+                                contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                        PlayMark(Modifier.align(Alignment.Center))
+                    } else if (photo.stage != Stage.PARKED) {
+                        photo.originalUri?.let {
+                            AsyncImage(
+                                model = it, contentDescription = null,
+                                contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                    }
+                }
+                // Videos and files: the real download is still running, dim what has not arrived yet
+                if (photo.kind != MediaKind.IMAGE && photo.verified == null && photo.stage != Stage.PARKED) {
+                    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f * (1f - photo.progress))))
+                    Text(
+                        "${(photo.progress * 100).toInt()}%", color = Color.White,
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 6.dp)
                     )
                 }
                 if (photo.stage == Stage.PARKED) {
                     Box(Modifier.fillMaxSize().background(Color.Red.copy(alpha = 0.45f)).clickable(onClick = onTap))
-                } else {
-                    photo.originalUri?.let {
-                        AsyncImage(
-                            model = it, contentDescription = null,
-                            contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()
-                        )
-                    }
                 }
             }
         }

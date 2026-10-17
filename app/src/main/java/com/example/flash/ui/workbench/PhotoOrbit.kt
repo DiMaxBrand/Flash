@@ -305,7 +305,7 @@ private fun OrbitPhotoItem(
 
     val photoBlobTime = (blobTime + phaseOffset * 137f).toDouble()
 
-    AsyncImage(
+    MediaImage(
         model = uri,
         contentDescription = null,
         contentScale = ContentScale.Crop,

@@ -31,7 +31,15 @@ data class IncomingPhoto(
     val tier: Int = 0,
     val retries: Int = 0,
     /** Retried 5 times and the checksum still does not match: shown as received, flagged at the end. */
-    val unverifiable: Boolean = false
+    val unverifiable: Boolean = false,
+    /** Pictures run the full animation; videos show their first frame and files a tile, while the real download runs. */
+    val kind: MediaKind = MediaKind.IMAGE,
+    val name: String = "",
+    val size: Long = 0L,
+    /** Download progress of the original, 0..1 (shown on videos and files). */
+    val progress: Float = 0f,
+    /** A video's first frame, assembled from its bands once they have all arrived. */
+    val poster: Bitmap? = null
 ) {
     /** Complete and checksum-verified: safe to reveal the real photo. */
     val ready: Boolean get() = originalUri != null && verified == true
