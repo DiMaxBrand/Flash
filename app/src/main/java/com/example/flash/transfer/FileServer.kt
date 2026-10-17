@@ -37,6 +37,31 @@ class FileServer(private val scope: CoroutineScope) {
     /** Emits once every file currently served has been sent in full. */
     val allDelivered: kotlinx.coroutines.flow.SharedFlow<Unit> = _allDelivered
 
+    // Bytes written to receivers vs. bytes to send, for the sender's progress display
+    private val sentBytes = java.util.concurrent.atomic.AtomicLong(0)
+    private val totalBytes = java.util.concurrent.atomic.AtomicLong(0)
+    private var lastProgress = 0f
+    private val _sendProgress = kotlinx.coroutines.flow.MutableStateFlow(0f)
+    /** 0..1 share of the served bytes already sent (aggregate over all files). */
+    val sendProgress: kotlinx.coroutines.flow.StateFlow<Float> = _sendProgress
+
+    private fun onBytesSent(count: Int) {
+        val total = totalBytes.get()
+        val sent = sentBytes.addAndGet(count.toLong())
+        val p = if (total > 0) (sent.toFloat() / total).coerceIn(0f, 1f) else 0f
+        if (p - lastProgress >= 0.005f || p >= 1f) {
+            lastProgress = p
+            _sendProgress.value = p
+        }
+    }
+
+    private fun refreshTotalBytes() {
+        val cr = appContext?.contentResolver ?: return
+        totalBytes.set(entries.sumOf { (_, uri) ->
+            runCatching { cr.openFileDescriptor(uri, "r")?.use { it.statSize } ?: 0L }.getOrDefault(0L)
+        })
+    }
+
     private fun markDelivered(index: Int) {
         delivered.add(index)
         if (!allDeliveredFired && entries.isNotEmpty() && delivered.size >= entries.size) {
@@ -48,6 +73,9 @@ class FileServer(private val scope: CoroutineScope) {
     private fun resetDelivery() {
         delivered.clear()
         allDeliveredFired = false
+        sentBytes.set(0)
+        lastProgress = 0f
+        _sendProgress.value = 0f
     }
 
     val fileCount: Int get() = entries.size
@@ -70,6 +98,7 @@ class FileServer(private val scope: CoroutineScope) {
         resetDelivery()
         appContext = context.applicationContext
         uris.forEach { entries.add(token to it) }
+        refreshTotalBytes()
         port = findFreePort()
         server = embeddedServer(CIO, port = port) {
             routing {
@@ -114,7 +143,15 @@ class FileServer(private val scope: CoroutineScope) {
                     call.response.header(HttpHeaders.ContentLength, fileSize.toString())
                     call.response.header("X-File-Checksum", hash)
                     call.respondOutputStream(contentType = ContentType.parse(mimeType)) {
-                        input.use { it.copyTo(this) }
+                        input.use { src ->
+                            val buffer = ByteArray(16 * 1024)
+                            while (true) {
+                                val n = src.read(buffer)
+                                if (n < 0) break
+                                write(buffer, 0, n)
+                                onBytesSent(n)
+                            }
+                        }
                     }
                     // Reached only if the whole body was written (a dropped client throws above)
                     markDelivered(index)
@@ -126,6 +163,7 @@ class FileServer(private val scope: CoroutineScope) {
 
     fun addUri(token: String, uri: Uri) {
         entries.add(token to uri)
+        refreshTotalBytes()
         allDeliveredFired = false   // a new file is waiting; report again when everything is out
     }
 

@@ -5,6 +5,8 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.spring
@@ -57,7 +59,8 @@ fun PhotoOrbit(
     receivingPhotos: List<Uri> = emptyList(),
     transferProgress: Float = 0f,
     shouldExit: Boolean = false,
-    corruptedIndices: Set<Int> = emptySet()
+    corruptedIndices: Set<Int> = emptySet(),
+    sendProgress: Float = 0f
 ) {
     val density = LocalDensity.current
 
@@ -93,6 +96,20 @@ fun PhotoOrbit(
     val baseOrbitRadiusPx = with(density) { 100.dp.toPx() }
     val photoSizeDp = 56.dp
     val photoSizePx = with(density) { photoSizeDp.toPx() }
+
+    // Sender: while files are going out, the photo grows to 2x and lights up bottom-to-top.
+    // Progress arrives in jumps, so it is eased with a critically damped (non-bouncy) spring.
+    val sending = sendProgress > 0f
+    val sendScale by animateFloatAsState(
+        targetValue = if (sending) 2f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
+        label = "send_scale"
+    )
+    val litProgress by animateFloatAsState(
+        targetValue = sendProgress,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessLow),
+        label = "send_lit"
+    )
 
     val visiblePhotos = remember { mutableStateListOf<Uri>() }
     val exitingPhotos = remember { mutableStateSetOf<Uri>() }
@@ -150,6 +167,8 @@ fun PhotoOrbit(
                     isExiting = isExiting,
                     isReceiving = isReceiving,
                     isCorrupted = isCorrupted,
+                    sendScale = sendScale,
+                    sendLit = if (sending && !isReceiving) litProgress else -1f,
                     successProgress = if (isExiting || isReceiving) 0f else successPulse.value,
                     onExitComplete = {
                         visiblePhotos.remove(uri)
@@ -177,6 +196,8 @@ private fun OrbitPhotoItem(
     isReceiving: Boolean = false,
     isCorrupted: Boolean = false,
     successProgress: Float = 0f,
+    sendScale: Float = 1f,
+    sendLit: Float = -1f,
     onExitComplete: () -> Unit
 ) {
     val entryProgress = remember { Animatable(0f) }
@@ -225,11 +246,11 @@ private fun OrbitPhotoItem(
         contentDescription = null,
         contentScale = ContentScale.Crop,
         modifier = Modifier
-            .size(photoSizeDp)
+            .size(photoSizeDp * sendScale)
             .offset {
                 IntOffset(
-                    (x - photoSizePx / 2f).roundToInt(),
-                    (y - photoSizePx / 2f).roundToInt()
+                    (x - photoSizePx * sendScale / 2f).roundToInt(),
+                    (y - photoSizePx * sendScale / 2f).roundToInt()
                 )
             }
             .graphicsLayer {
@@ -269,6 +290,26 @@ private fun OrbitPhotoItem(
                     )
                     clipPath(path) {
                         this@onDrawWithContent.drawContent()
+
+                        if (sendLit >= 0f && sendLit < 1f) {
+                            // Sender progress: the unlit part is dimmed and the boundary rises from
+                            // the bottom with progress as a soft cross-fade, not a hard edge.
+                            val band = 0.35f
+                            val top = ((1f - sendLit) * (1f + band) - band).coerceIn(0f, 1f)
+                            val bottom = (top + band).coerceIn(0f, 1f)
+                            val dark = Color.Black.copy(alpha = 0.62f)
+                            drawRect(
+                                brush = Brush.verticalGradient(
+                                    colorStops = arrayOf(
+                                        0f to dark,
+                                        top to dark,
+                                        bottom to Color.Transparent,
+                                        1f to Color.Transparent
+                                    )
+                                ),
+                                size = size
+                            )
+                        }
                     }
 
                     // Red tint for corrupted photos

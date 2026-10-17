@@ -66,7 +66,8 @@ data class WorkbenchUiState(
     val detectionStrength: Float = 0f,
     val cameraHandshakeEnabled: Boolean = false,
     val transferError: String? = null,
-    val infoMessage: String? = null
+    val infoMessage: String? = null,
+    val sendProgress: Float = 0f
 )
 
 private const val LOCK_DISPLAY_MS = 3500L
@@ -110,6 +111,16 @@ class WorkbenchViewModel(
             .onEach { onAllFilesDelivered() }
             .launchIn(viewModelScope)
 
+        transferRepository.sendProgressFlow
+            .onEach { p ->
+                val s = _uiState.value
+                // Only meaningful on the sending phone (photos selected, not receiving)
+                if (s.selectedPhotos.isNotEmpty() && !s.isReceiving && p != s.sendProgress) {
+                    _uiState.update { it.copy(sendProgress = p) }
+                }
+            }
+            .launchIn(viewModelScope)
+
         transferRepository.fileVerifiedFlow
             .onEach { result ->
                 if (result != null) {
@@ -136,6 +147,7 @@ class WorkbenchViewModel(
                 it.copy(
                     selectedPhotos = emptySet(),
                     transferProgress = 0f,
+                    sendProgress = 0f,
                     showHotspotPrompt = false,
                     infoMessage = null
                 )

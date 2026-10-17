@@ -375,6 +375,10 @@ Settings has a **Pairing method** row (`HandshakeMode`: AUTO / NFC / CAMERA, sto
 
 `FileServer` marks a file delivered when its response body was written in full (a dropped client throws before that) and emits `allDelivered` once every served file has been delivered. `WorkbenchViewModel.onAllFilesDelivered()` (sender only) sets `transferProgress = 1f` so `PhotoOrbit` plays its success pulse (photos swell and collapse into the core), shows "Photos delivered", then after ~2.6 s clears the selection, the NFC handshake and the mDNS advertisement, and sets `currentPort = 0` so the next selection starts a fresh server/token. The old server is stopped 60 s later (only if nothing new started) so a receiver whose checksum failed can still retry. "Delivered" means bytes sent — the receiver's checksum result is not reported back.
 
+## Sender progress
+
+`FileServer` counts bytes written to receivers against the total size of the served files (`sendProgress`, 0..1, aggregate over all files; it measures bytes handed to the socket, so small photos can jump quickly). `WorkbenchViewModel` mirrors it into `uiState.sendProgress` on the sending phone. `PhotoOrbit` then grows each orbiting photo to 2x (`sendScale`, non-bouncy spring) and dims the unlit part with a vertical gradient whose soft edge rises from the bottom (`sendLit`, eased with a critically damped low-stiffness spring so jumps like 0%→80% glide).
+
 ## Receiving animation & grid
 
 Received photos are added to the FRONT of the grid (`photos = received + photos`), the grid is scrolled to the top, and `ReceivedPhotoOrbitToGalleryFlyer` lands on the real top cell (column width = (screen − padding − gaps) / 3; items are 100 dp inside it). Appending to the end put the photo off-screen, so the flyer overlapped an unrelated photo and then it seemed to vanish into the void.
