@@ -343,7 +343,7 @@ fun updateFrame(yuv: ByteArray) {
 - Connection confirmed via `onColorConfirmed()` → calls `startDownload()`
 
 ### Design Notes
-- **Permissions** are requested by `WorkbenchScreen` as soon as pairing is active: `CAMERA` (only if camera pairing is on), `NEARBY_WIFI_DEVICES` (Android 13+) and `ACCESS_LOCAL_NETWORK` (newer Android/HyperOS may block LAN connections without it — a hypothesis for `NoRouteToHostException`, unverified). The status box shows `permissions: camera/nearby/local network yes|NO`. The viewfinder only shows once the camera is granted
+- **Permissions** are requested by `WorkbenchScreen` as soon as pairing is active: `CAMERA` (only if camera pairing is on), `NEARBY_WIFI_DEVICES` (Android 13+) and `ACCESS_LOCAL_NETWORK` (newer Android/HyperOS may block LAN connections without it — a hypothesis for `NoRouteToHostException`, unverified). The status box shows `permissions: camera/nearby/local network yes|NO|n/a` (n/a = this Android version does not define that permission, so it is never requested). Tapping the box re-requests whatever is missing, and opens the app's settings page if Android shows no dialog (denied for good). The viewfinder only shows once the camera is granted
 - **Fallback only**: Only used on HyperOS devices (checked via `DeviceDetector.isHyperOSDevice()`)
 - **UI non-blocking**: Analysis runs on background thread, doesn't freeze Compose
 - **Deterministic colors**: HSV palette ensures distinct, visually separable hues

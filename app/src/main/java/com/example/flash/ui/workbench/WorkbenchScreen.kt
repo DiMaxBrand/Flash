@@ -181,22 +181,50 @@ fun WorkbenchScreen(
     ) == android.content.pm.PackageManager.PERMISSION_GRANTED
     val nearbyPermission = "android.permission.NEARBY_WIFI_DEVICES"
     val localNetPermission = "android.permission.ACCESS_LOCAL_NETWORK"
-    var nearbyGranted by remember { mutableStateOf(Build.VERSION.SDK_INT < 33 || isGranted(nearbyPermission)) }
-    var localNetGranted by remember { mutableStateOf(Build.VERSION.SDK_INT < 36 || isGranted(localNetPermission)) }
+    // A permission this Android version does not define can never be granted or prompted for
+    fun isDefined(permission: String) = runCatching {
+        context.packageManager.getPermissionInfo(permission, 0)
+    }.isSuccess
+    val nearbyKnown = Build.VERSION.SDK_INT >= 33 && isDefined(nearbyPermission)
+    val localNetKnown = isDefined(localNetPermission)
+    var nearbyGranted by remember { mutableStateOf(!nearbyKnown || isGranted(nearbyPermission)) }
+    var localNetGranted by remember { mutableStateOf(!localNetKnown || isGranted(localNetPermission)) }
+    var openSettingsIfStillDenied by remember { mutableStateOf(false) }
+
+    fun missingPairingPermissions() = buildList {
+        if (cameraOn && !cameraGranted) add(android.Manifest.permission.CAMERA)
+        if (nearbyKnown && !nearbyGranted) add(nearbyPermission)
+        if (localNetKnown && !localNetGranted) add(localNetPermission)
+    }
+
     val pairingPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
     ) { grants ->
         grants[android.Manifest.permission.CAMERA]?.let { cameraGranted = it }
         grants[nearbyPermission]?.let { nearbyGranted = it }
         grants[localNetPermission]?.let { localNetGranted = it }
-    }
-    LaunchedEffect(cameraOn) {
-        val missing = buildList {
-            if (cameraOn && !cameraGranted) add(android.Manifest.permission.CAMERA)
-            if (!nearbyGranted) add(nearbyPermission)
-            if (!localNetGranted) add(localNetPermission)
+        // Tapped to fix it but Android showed no dialog (denied for good): go to the app's settings
+        if (openSettingsIfStillDenied && missingPairingPermissions().isNotEmpty()) {
+            context.startActivity(
+                Intent(
+                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.fromParts("package", context.packageName, null)
+                )
+            )
         }
+        openSettingsIfStillDenied = false
+    }
+    // Asked automatically when pairing becomes active; tapping the status box asks again
+    LaunchedEffect(cameraOn) {
+        val missing = missingPairingPermissions()
         if (missing.isNotEmpty()) pairingPermissionLauncher.launch(missing.toTypedArray())
+    }
+    val requestPairingPermissions = {
+        val missing = missingPairingPermissions()
+        if (missing.isNotEmpty()) {
+            openSettingsIfStillDenied = true
+            pairingPermissionLauncher.launch(missing.toTypedArray())
+        }
     }
 
     // ── Initialize camera handshake on first load ───────────────────────────
@@ -651,8 +679,9 @@ fun WorkbenchScreen(
                 if (handshakeLog.isNotEmpty()) {
                     androidx.compose.material3.Text(
                         text = "permissions: camera ${if (cameraGranted) "yes" else "NO"} · " +
-                            "nearby ${if (nearbyGranted) "yes" else "NO"} · " +
-                            "local network ${if (localNetGranted) "yes" else "NO"}\n" +
+                            "nearby ${if (!nearbyKnown) "n/a" else if (nearbyGranted) "yes" else "NO"} · " +
+                            "local network ${if (!localNetKnown) "n/a" else if (localNetGranted) "yes" else "NO"}" +
+                            (if (missingPairingPermissions().isNotEmpty()) "  (tap to grant)" else "") + "\n" +
                             handshakeLog.joinToString("\n"),
                         color = androidx.compose.ui.graphics.Color.White,
                         style = MaterialTheme.typography.labelSmall,
@@ -661,6 +690,7 @@ fun WorkbenchScreen(
                                 androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.55f),
                                 RoundedCornerShape(12.dp)
                             )
+                            .clickable { requestPairingPermissions() }
                             .padding(horizontal = 10.dp, vertical = 6.dp)
                     )
                 }
