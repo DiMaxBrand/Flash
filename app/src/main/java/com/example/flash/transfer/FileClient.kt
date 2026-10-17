@@ -23,7 +23,7 @@ class FileClient {
     private val client = HttpClient(CIO) {
         install(HttpTimeout) {
             requestTimeoutMillis = 30_000
-            connectTimeoutMillis = 10_000
+            connectTimeoutMillis = 5_000
         }
     }
 

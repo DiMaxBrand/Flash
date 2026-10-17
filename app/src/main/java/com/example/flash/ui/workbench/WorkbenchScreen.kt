@@ -172,13 +172,29 @@ fun WorkbenchScreen(
             ) == android.content.pm.PackageManager.PERMISSION_GRANTED
         )
     }
-    val cameraPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
-    ) { granted -> cameraGranted = granted }
+    // Nearby devices (Android 13+) and local network access (newer Android / HyperOS) are
+    // requested together with the camera, so one prompt chain covers pairing.
+    fun isGranted(permission: String) = androidx.core.content.ContextCompat.checkSelfPermission(
+        context, permission
+    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    val nearbyPermission = "android.permission.NEARBY_WIFI_DEVICES"
+    val localNetPermission = "android.permission.ACCESS_LOCAL_NETWORK"
+    var nearbyGranted by remember { mutableStateOf(Build.VERSION.SDK_INT < 33 || isGranted(nearbyPermission)) }
+    var localNetGranted by remember { mutableStateOf(Build.VERSION.SDK_INT < 36 || isGranted(localNetPermission)) }
+    val pairingPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        grants[android.Manifest.permission.CAMERA]?.let { cameraGranted = it }
+        grants[nearbyPermission]?.let { nearbyGranted = it }
+        grants[localNetPermission]?.let { localNetGranted = it }
+    }
     LaunchedEffect(cameraOn) {
-        if (cameraOn && !cameraGranted) {
-            cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
+        val missing = buildList {
+            if (cameraOn && !cameraGranted) add(android.Manifest.permission.CAMERA)
+            if (!nearbyGranted) add(nearbyPermission)
+            if (!localNetGranted) add(localNetPermission)
         }
+        if (missing.isNotEmpty()) pairingPermissionLauncher.launch(missing.toTypedArray())
     }
 
     // ── Initialize camera handshake on first load ───────────────────────────
@@ -251,6 +267,9 @@ fun WorkbenchScreen(
     LaunchedEffect(Unit) {
         val needed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
             arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
+        else if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P)
+            // Android 9 and older also need WRITE to save received photos into the gallery
+            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE)
         else
             arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
         val allGranted = needed.all {
@@ -622,7 +641,10 @@ fun WorkbenchScreen(
                     .status.collectAsStateWithLifecycle()
                 if (handshakeLog.isNotEmpty()) {
                     androidx.compose.material3.Text(
-                        text = handshakeLog.joinToString("\n"),
+                        text = "permissions: camera ${if (cameraGranted) "yes" else "NO"} · " +
+                            "nearby ${if (nearbyGranted) "yes" else "NO"} · " +
+                            "local network ${if (localNetGranted) "yes" else "NO"}\n" +
+                            handshakeLog.joinToString("\n"),
                         color = androidx.compose.ui.graphics.Color.White,
                         style = MaterialTheme.typography.labelSmall,
                         modifier = Modifier

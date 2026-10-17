@@ -180,10 +180,34 @@ class WorkbenchViewModel(
         _uiState.update { it.copy(showHotspotPrompt = false) }
     }
 
+    /** Android 8-9: write into Pictures/Flash directly (needs WRITE_EXTERNAL_STORAGE) and let the gallery scan it. */
+    @Suppress("DEPRECATION")
+    private fun saveToGalleryLegacy(file: File): Boolean = try {
+        val app = FlashApplication.instance
+        val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+            app, android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (!granted) {
+            false
+        } else {
+            val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "Flash")
+            dir.mkdirs()
+            val name = file.name.replaceFirst(Regex("^\\d+_"), "")
+            var target = File(dir, name)
+            var n = 1
+            while (target.exists()) { target = File(dir, "${target.nameWithoutExtension}_${n++}.${target.extension}") }
+            file.copyTo(target)
+            android.media.MediaScannerConnection.scanFile(app, arrayOf(target.absolutePath), null, null)
+            true
+        }
+    } catch (e: Exception) {
+        false
+    }
+
     /** Copies a received photo into MediaStore (Pictures/Flash). Android 10+ needs no permission. */
     private fun saveToGallery(file: File): Boolean {
         if (!file.exists() || !savedToGallery.add(file.absolutePath)) return false
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false   // would need WRITE_EXTERNAL_STORAGE
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return saveToGalleryLegacy(file)
         return try {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeFile(file.absolutePath, bounds)

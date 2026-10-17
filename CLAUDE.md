@@ -327,7 +327,7 @@ fun updateFrame(yuv: ByteArray) {
     // 3. Sustained match ≥ 1000ms (no flickering false positives)
 }
 ```
-- In camera mode a receiver (no photos selected, not mid-transfer) shows the live back-camera preview immediately; color matching starts once a sender is discovered over mDNS (state `Detecting`). `MotherCore(viewfinderContent = { MotherCoreViewfinder(...) })` clips the live preview to the morphing blob path itself (no static circle; `PreviewView` uses COMPATIBLE/TextureView mode so the clip applies) and skips its opaque lens layer and glow
+- In camera mode a receiver (no photos selected, not mid-transfer) shows the live back-camera preview immediately; color matching starts once a sender is discovered over mDNS (state `Detecting`). `MotherCore(viewfinderContent = { MotherCoreViewfinder(...) })` clips the live view to the morphing blob path itself (no static circle). The view is drawn on a plain Compose Canvas from the ImageAnalysis frames (YUV→small bitmap, ~15 fps) — NOT a PreviewView: TextureView/SurfaceView inside the shape clip rendered black on the user's Samsung while colour matching kept working and skips its opaque lens layer and glow
 - Continuously analyzes YUV frames for dominant color
 - Only locks when all 3 conditions sustained for 1 second
 
@@ -343,7 +343,7 @@ fun updateFrame(yuv: ByteArray) {
 - Connection confirmed via `onColorConfirmed()` → calls `startDownload()`
 
 ### Design Notes
-- **Camera permission** is requested by `WorkbenchScreen` as soon as camera pairing is active (`cameraOn`); the viewfinder only shows once it is granted
+- **Permissions** are requested by `WorkbenchScreen` as soon as pairing is active: `CAMERA` (only if camera pairing is on), `NEARBY_WIFI_DEVICES` (Android 13+) and `ACCESS_LOCAL_NETWORK` (newer Android/HyperOS may block LAN connections without it — a hypothesis for `NoRouteToHostException`, unverified). The status box shows `permissions: camera/nearby/local network yes|NO`. The viewfinder only shows once the camera is granted
 - **Fallback only**: Only used on HyperOS devices (checked via `DeviceDetector.isHyperOSDevice()`)
 - **UI non-blocking**: Analysis runs on background thread, doesn't freeze Compose
 - **Deterministic colors**: HSV palette ensures distinct, visually separable hues
@@ -367,7 +367,7 @@ Settings has a **Pairing method** row (`HandshakeMode`: AUTO / NFC / CAMERA, sto
 
 ## Received Files & Hotspot Prompt
 
-- Downloads land in `cacheDir/transfers/` (Android may clear it). After each file passes its checksum, `WorkbenchViewModel.saveToGallery()` copies it into MediaStore `Pictures/Flash` (Android 10+, no permission; older Android keeps it in cache only) and a green "Saved to Pictures/Flash" message shows. The in-app Uri is left as the cache file on purpose so the orbit doesn't swap items.
+- Downloads land in `cacheDir/transfers/` (Android may clear it). After each file passes its checksum, `WorkbenchViewModel.saveToGallery()` copies it into MediaStore `Pictures/Flash` (Android 10+: no permission; Android 8–9: written straight to Pictures/Flash with WRITE_EXTERNAL_STORAGE, requested with the gallery permission) and a green "Saved to Pictures/Flash" message shows. The in-app Uri is left as the cache file on purpose so the orbit doesn't swap items.
 - The "No Wi-Fi?" hotspot dialog is driven by `updateWifiStatus()`, polled every 1.5 s from `WorkbenchScreen`. "Connected" = `LocalNetwork.localIpv4() != null` (joined to Wi-Fi, even under a VPN, or hosting a hotspot). Dismissing it keeps it dismissed until a connection is seen and lost again.
 - Settings shows `Flash <versionName> (build <versionCode>)` so a screenshot/recording can be matched to a release.
 
