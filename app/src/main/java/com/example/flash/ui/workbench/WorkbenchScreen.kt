@@ -755,7 +755,8 @@ fun WorkbenchScreen(
         // ── Status, errors and the scan popup: one column ABOVE everything else ──
         // Drawn after MotherCore and the "+" button, and kept in the free band between the
         // photo grid and the bottom buttons, so nothing (blob, "+", buttons) covers it.
-        Column(
+        // Hidden while the settings panel is open: the panel always has the top layer
+        if (!showSettings) Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 160.dp, start = 16.dp, end = 16.dp),
