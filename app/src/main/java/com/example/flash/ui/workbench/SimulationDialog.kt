@@ -3,6 +3,8 @@ package com.example.flash.ui.workbench
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -32,7 +34,11 @@ fun SimulationDialog(viewModel: WorkbenchViewModel, onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         title = { Text("Simulation") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            // Scrollable: the dialog is taller than a phone screen with all the options
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.verticalScroll(rememberScrollState())
+            ) {
                 Text(
                     "Acts like a real transfer with generated pictures. No network, nothing is saved to the gallery.",
                     style = MaterialTheme.typography.bodySmall
