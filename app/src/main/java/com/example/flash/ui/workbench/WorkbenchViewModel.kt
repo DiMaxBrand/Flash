@@ -57,7 +57,9 @@ data class WorkbenchUiState(
     val receivedPhotos: List<Uri> = emptyList(),
     val receivingPhotos: List<Uri> = emptyList(),
     val corruptedPhotos: List<Uri> = emptyList(),
-    val corruptedIndicesInOrbit: Set<Int> = emptySet(),
+    val sessionColor: Int? = null,                   // the sender's colour, kept for the whole receive session
+    val landingPhotos: Set<Uri> = emptySet(),        // good photos currently flying into the grid
+    val rejectedPhotos: List<Uri> = emptyList(),     // failed their checksum: red, parked in the core
     val isWifiConnected: Boolean = false,
     val showHotspotPrompt: Boolean = false,
     val displayColor: Int? = null,
@@ -71,6 +73,7 @@ data class WorkbenchUiState(
 )
 
 private const val LOCK_DISPLAY_MS = 3500L
+private const val ORBIT_MIN_MS = 3000L
 
 class WorkbenchViewModel(
     private val transferRepository: TransferRepository,
@@ -121,15 +124,17 @@ class WorkbenchViewModel(
             }
             .launchIn(viewModelScope)
 
+        // Checksum verdicts arrive while the receiving animation plays; they are only recorded here
+        // and acted on once the photos have orbited for ORBIT_MIN_MS (see settleReceivedPhotos).
         transferRepository.fileVerifiedFlow
-            .onEach { result ->
-                if (result != null) {
-                    val (index, isValid) = result
-                    onPhotoVerified(index, isValid)
-                }
-            }
+            .onEach { (index, isValid) -> verifyResults[index] = isValid }
             .launchIn(viewModelScope)
     }
+
+    private val verifyResults = java.util.concurrent.ConcurrentHashMap<Int, Boolean>()
+    private var lastDownload: PeerHandshake? = null
+    private var failedIndices: List<Int> = emptyList()
+    private var receiveJob: kotlinx.coroutines.Job? = null
 
     /**
      * Sender side: every file has been sent in full. Play the success pulse (photos collapse into
@@ -162,35 +167,56 @@ class WorkbenchViewModel(
         }
     }
 
-    private fun onPhotoVerified(index: Int, isValid: Boolean) {
-        if (!isValid) {
-            _uiState.update {
-                it.copy(corruptedIndicesInOrbit = it.corruptedIndicesInOrbit + index)
-            }
-        } else {
-            val allReceiving = _uiState.value.receivingPhotos
-            if (index < allReceiving.size) {
-                val photoUri = allReceiving[index]
-                viewModelScope.launch {
-                    delay(100)
-                    // Keep a copy in the phone's gallery (the app's own copy lives in the cache,
-                    // which Android may clear). The in-app Uri is left alone so the orbit doesn't pop.
-                    val saved = withContext(Dispatchers.IO) {
-                        photoUri.path?.let { saveToGallery(File(it)) } == true
-                    }
-                    if (saved) {
-                        _uiState.update { it.copy(infoMessage = "Saved to Pictures/Flash in your gallery") }
-                        launch { delay(5000); _uiState.update { it.copy(infoMessage = null) } }
-                    }
-                    _uiState.update { state ->
-                        state.copy(
-                            photos = (listOf(photoUri) + state.photos).distinct(),
-                            receivingPhotos = state.receivingPhotos - photoUri
-                        )
-                    }
+    /**
+     * Receiving phone: the photos orbit for at least [ORBIT_MIN_MS] while their checksums are
+     * verified in parallel. Then good photos fly into the grid (making room for them) and photos
+     * that failed turn red and move back into the Mother Core.
+     */
+    private suspend fun settleReceivedPhotos(uris: List<Uri>, indices: List<Int>) {
+        delay(ORBIT_MIN_MS)
+        // Verification started when the download finished; wait only if it is somehow still running
+        kotlinx.coroutines.withTimeoutOrNull(10_000) {
+            while (indices.any { !verifyResults.containsKey(it) }) delay(50)
+        }
+        val good = uris.filterIndexed { i, _ -> verifyResults[indices[i]] != false }
+        val bad = uris.filterIndexed { i, _ -> verifyResults[indices[i]] == false }
+        failedIndices = indices.filter { verifyResults[it] == false }
+
+        if (good.isNotEmpty()) {
+            // Space opens in the grid (animated) while the photos fly in; copies go to the gallery
+            _uiState.update { it.copy(photos = (good + it.photos).distinct(), landingPhotos = good.toSet()) }
+            viewModelScope.launch {
+                val saved = withContext(Dispatchers.IO) {
+                    good.count { uri -> uri.path?.let { saveToGallery(File(it)) } == true }
+                }
+                if (saved > 0) {
+                    _uiState.update { it.copy(infoMessage = "Saved to Pictures/Flash in your gallery") }
+                    delay(5000)
+                    _uiState.update { it.copy(infoMessage = null) }
                 }
             }
         }
+        if (bad.isNotEmpty()) {
+            _uiState.update { it.copy(rejectedPhotos = bad, corruptedPhotos = bad) }
+        }
+        if (good.isEmpty() && bad.isEmpty()) finishReceiveSession()
+    }
+
+    /** A flying photo reached its grid cell. */
+    fun onPhotoLanded(uri: Uri) {
+        _uiState.update { it.copy(landingPhotos = it.landingPhotos - uri, receivingPhotos = it.receivingPhotos - uri) }
+        finishReceiveSession()
+    }
+
+    private fun finishReceiveSession() {
+        val s = _uiState.value
+        if (s.landingPhotos.isEmpty() && s.rejectedPhotos.isEmpty() && s.receivingPhotos.isEmpty()) {
+            _uiState.update { it.copy(isReceiving = false, transferProgress = 0f, sessionColor = null) }
+        }
+    }
+
+    private fun deleteFailedFiles() {
+        _uiState.value.rejectedPhotos.forEach { uri -> uri.path?.let { runCatching { File(it).delete() } } }
     }
 
     /**
@@ -449,7 +475,8 @@ class WorkbenchViewModel(
 
     fun onColorConfirmed(context: Context) {
         val handshake = _uiState.value.detectedPeerColor ?: return
-        _uiState.update { it.copy(isReceiving = true) }
+        // The core keeps the sender's colour until the whole receive session is over
+        _uiState.update { it.copy(isReceiving = true, sessionColor = handshake.displayColor) }
         startDownload(
             PeerHandshake(
                 ip = handshake.ip,
@@ -473,35 +500,38 @@ class WorkbenchViewModel(
         }
     }
 
-    fun startDownload(handshake: PeerHandshake, context: Context) {
-        transferRepository.startDownload(handshake.ip, handshake.port, handshake.token, handshake.fileCount, context)
+    fun startDownload(handshake: PeerHandshake, context: Context, indices: List<Int>? = null) {
+        lastDownload = handshake
+        verifyResults.clear()
+        transferRepository.startDownload(handshake.ip, handshake.port, handshake.token, handshake.fileCount, context, indices)
         _uiState.update { it.copy(nfcState = NfcUiState.Transferring) }
     }
 
     private fun onTransferStateChanged(state: TransferState) {
         when (state) {
             is TransferState.Complete -> {
-                val allFileUris = state.receivedFiles.map { file ->
-                    android.net.Uri.fromFile(file)
-                }
-                val corruptedSet = state.corruptedIndices.toSet()
-                val corruptedPhotos = allFileUris.filterIndexed { idx, _ -> idx in corruptedSet }
-
+                val uris = state.files.map { Uri.fromFile(it.file) }
+                val indices = state.files.map { it.index }
                 _uiState.update {
                     it.copy(
                         nfcState = NfcUiState.Complete,
                         transferProgress = 1f,
                         showRipple = true,
-                        receivingPhotos = allFileUris,
-                        corruptedPhotos = corruptedPhotos
+                        receivingPhotos = uris,
+                        landingPhotos = emptySet(),
+                        rejectedPhotos = emptyList(),
+                        corruptedPhotos = emptyList()
                     )
                 }
+                receiveJob?.cancel()
+                receiveJob = viewModelScope.launch { settleReceivedPhotos(uris, indices) }
             }
             is TransferState.Failed -> {
                 _uiState.update {
                     it.copy(
                         nfcState = NfcUiState.Error(state.reason),
                         isReceiving = false,
+                        sessionColor = null,
                         transferError = state.reason
                     )
                 }
@@ -521,44 +551,50 @@ class WorkbenchViewModel(
     }
 
     fun onRippleComplete() {
-        _uiState.update { it.copy(showRipple = false, isReceiving = false, transferProgress = 0f) }
+        // The ripple is only decoration; the receive session ends when every photo has landed in
+        // the grid or the rejected ones were dismissed (finishReceiveSession).
+        _uiState.update { it.copy(showRipple = false) }
         transferRepository.reset()
         currentPort = 0
-    }
-
-    fun onReceivingPhotosReadyForGallery() {
-        val receiving = _uiState.value.receivingPhotos
-        if (receiving.isNotEmpty()) {
-            _uiState.update {
-                it.copy(
-                    photos = (receiving + it.photos).distinct(),
-                    receivingPhotos = emptyList()
-                )
-            }
-        }
-    }
-
-    fun startGalleryTransitionForReceivingPhotos() {
-        viewModelScope.launch {
-            delay(2100L)  // Wait for gallery flight animation to complete
-            onReceivingPhotosReadyForGallery()
-        }
     }
 
     fun onExitRequested() {
         _uiState.update { it.copy(shouldExit = true) }
     }
 
+    /** "Skip": forget the damaged photos (their files are deleted). */
     fun dismissCorruptionAlert() {
-        _uiState.update { it.copy(corruptedPhotos = emptyList()) }
+        deleteFailedFiles()
+        _uiState.update {
+            it.copy(
+                corruptedPhotos = emptyList(),
+                receivingPhotos = it.receivingPhotos - it.rejectedPhotos.toSet(),
+                rejectedPhotos = emptyList()
+            )
+        }
+        failedIndices = emptyList()
+        finishReceiveSession()
     }
 
+    /** "Retry": download only the damaged files again from the sender (its server stays up for a minute). */
     fun retryCorruptedPhotos(context: Context) {
-        val currentState = _uiState.value
-        if (currentState.corruptedPhotos.isNotEmpty()) {
+        val handshake = lastDownload
+        val indices = failedIndices
+        if (handshake == null || indices.isEmpty()) {
             dismissCorruptionAlert()
-            _uiState.update { it.copy(nfcState = NfcUiState.Idle) }
+            return
         }
+        deleteFailedFiles()
+        _uiState.update {
+            it.copy(
+                corruptedPhotos = emptyList(),
+                receivingPhotos = it.receivingPhotos - it.rejectedPhotos.toSet(),
+                rejectedPhotos = emptyList(),
+                isReceiving = true
+            )
+        }
+        failedIndices = emptyList()
+        startDownload(handshake, context, indices)
     }
 
     fun initializeCameraHandshake() {

@@ -384,9 +384,17 @@ Expressive layout: a **tray** at the top (status line; the receiver's camera vie
 
 `FileServer` counts bytes written to receivers against the total size of the served files (`sendProgress`, 0..1, aggregate over all files; it measures bytes handed to the socket, so small photos can jump quickly). `WorkbenchViewModel` mirrors it into `uiState.sendProgress` on the sending phone. `PhotoOrbit` then grows each orbiting photo to 2x (`sendScale`, non-bouncy spring) and dims the unlit part with a vertical gradient whose soft edge rises from the bottom (`sendLit`, eased with a critically damped low-stiffness spring so jumps like 0%→80% glide).
 
-## Receiving animation & grid
+## Receiving flow (verification runs alongside the animation)
 
-Received photos are added to the FRONT of the grid (`photos = received + photos`), the grid is scrolled to the top, and `ReceivedPhotoOrbitToGalleryFlyer` lands on the real top cell (column width = (screen − padding − gaps) / 3; items are 100 dp inside it). Appending to the end put the photo off-screen, so the flyer overlapped an unrelated photo and then it seemed to vanish into the void.
+1. `FileClient.downloadAll` returns as soon as the files are saved and starts one checksum verification per file **concurrently** in the repository scope (SHA-256 of a few MB takes tens of ms; the old fixed 500 ms delay and the old "wait for verification before reporting Complete" are gone). Verdicts arrive on `fileVerifiedFlow` (a `SharedFlow`, never conflated). Corrupted files are no longer deleted by the client.
+2. `TransferState.Complete(files: List<DownloadedFile>)` -> the VM puts the photos in `receivingPhotos` (they materialize and orbit the core) and runs `settleReceivedPhotos`: orbit for **at least 3 s** (`ORBIT_MIN_MS`), wait for any verdict still missing, then split:
+   - **good**: prepended to the grid (`landingPhotos`; the grid cells animate apart via `Modifier.animateItem()` and stay empty/hidden), each orbiting photo flies from where it is to its square grid cell while growing (`OrbitPhotoItem` landing animation, 900 ms), then `onPhotoLanded` removes it from the orbit and the cell fades in. Each good photo is also copied to Pictures/Flash.
+   - **bad**: `rejectedPhotos` turn red, move back into the Mother Core and stay parked there; the core turns red, a red "N photo(s) came through damaged" pill shows and the red `CorruptionAlert` dialog appears. "Retry" deletes the damaged files and downloads only those indices again (`startDownload(..., indices)`; the sender's server stays up for 60 s); "Skip" deletes them.
+3. The receive session ends (`finishReceiveSession`: `isReceiving=false`, progress 0, `sessionColor=null`) when nothing is left to land or park. `onRippleComplete` is only decoration now.
+4. The core keeps the sender's colour for the whole session (`sessionColor`), not just the 3.5 s the scan popup shows.
+5. Grid cells are square (`aspectRatio(1f)`, column width = (screen − 8dp padding×2 − 4dp gaps×2) / 3) so `landingTargets` match the real cells.
+6. Gotcha: `ConcurrentHashMap.contains(x)` means `containsValue` — use `containsKey`.
+7. The Expressive style has no orbit: `landingPhotos` land immediately and rejected photos show as red tray tiles plus the same dialog.
 
 ## Network Corruption Detection & Recovery
 
@@ -416,10 +424,10 @@ onFileVerified(index, isValid)
 - Photos marked with red tint in PhotoOrbit during transfer
 
 ### Data Flow
-1. `TransferRepository.fileVerifiedFlow` emits `Pair<Int, Boolean>` (index, isValid)
-2. `WorkbenchViewModel.onPhotoVerified()` adds invalid indices to `corruptedIndicesInOrbit`
-3. `PhotoOrbit` marks photos where `uriIndex in corruptedIndices`
-4. On transfer complete, `CorruptionAlert` modal shows verified results
+1. `TransferRepository.fileVerifiedFlow` emits `Pair<Int, Boolean>` (file index, isValid)
+2. `WorkbenchViewModel` records them in `verifyResults`; `settleReceivedPhotos` acts on them (see Receiving flow)
+3. `PhotoOrbit` parks `rejectedPhotos` red inside the core
+4. The red `CorruptionAlert` modal offers Retry (only the damaged files) or Skip
 
 ## How to Update This File in Future Sessions
 

@@ -28,6 +28,7 @@
     <string name="cd_core">Mother Core</string>
     <string name="hce_service_desc">Flash Handshake Service</string>
     <string name="hce_aid_group_desc">Flash NFC Handshake</string>
+    <string name="damaged_photos">%1$d photo(s) came through damaged</string>
     <string name="corruption_title">Network said no thanks</string>
     <string name="corruption_subtitle">These ones didn\'t survive the trip</string>
     <string name="corruption_description">Deleted to spare your feelings. Network said these were sus.</string>

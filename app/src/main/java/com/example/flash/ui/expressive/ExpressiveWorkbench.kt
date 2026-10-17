@@ -145,6 +145,11 @@ fun ExpressiveWorkbench(
         }
     }
 
+    // No orbit/flight in this layout: good photos "land" in the grid at once
+    LaunchedEffect(state.landingPhotos) {
+        state.landingPhotos.forEach { viewModel.onPhotoLanded(it) }
+    }
+
     var showSettings by remember { mutableStateOf(false) }
     val viewfinderActive = cameraGranted && state.cameraHandshakeEnabled &&
         state.selectedPhotos.isEmpty() && !state.isReceiving &&
@@ -403,12 +408,12 @@ private fun Tray(
                         .clip(cookie)
                         .background(Color(state.displayColor!!))
                 )
-            } else if (state.colorDetectionState == ColorDetectionState.Locked && state.detectedPeerColor != null) {
+            } else if (state.sessionColor != null || (state.colorDetectionState == ColorDetectionState.Locked && state.detectedPeerColor != null)) {
                 Box(
                     Modifier
                         .size(200.dp)
                         .clip(cookie)
-                        .background(Color(state.detectedPeerColor!!.displayColor))
+                        .background(Color(state.sessionColor ?: state.detectedPeerColor!!.displayColor))
                 )
             }
 
@@ -427,6 +432,7 @@ private fun Tray(
                         TrayTile(
                             uri = uri,
                             progress = if (rawProgress > 0f) progress else -1f,
+                            rejected = uri in state.rejectedPhotos,
                             onClick = { if (!receiving && state.sendProgress == 0f) onRemove(uri) }
                         )
                     }
@@ -447,7 +453,7 @@ private fun Tray(
 
 /** A tray photo. While [progress] is 0..1 the unlit part is dimmed and the light rises from the bottom. */
 @Composable
-private fun TrayTile(uri: android.net.Uri, progress: Float, onClick: () -> Unit) {
+private fun TrayTile(uri: android.net.Uri, progress: Float, rejected: Boolean = false, onClick: () -> Unit) {
     val done = progress >= 0.999f
     Box(
         Modifier
@@ -483,7 +489,10 @@ private fun TrayTile(uri: android.net.Uri, progress: Float, onClick: () -> Unit)
                     }
                 }
         )
-        if (done) {
+        if (rejected) {
+            Box(Modifier.fillMaxSize().background(Color.Red.copy(alpha = 0.5f)))
+        }
+        if (done && !rejected) {
             Icon(
                 Icons.Default.Check,
                 contentDescription = null,

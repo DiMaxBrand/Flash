@@ -17,11 +17,8 @@ sealed interface TransferState {
     object Idle : TransferState
     data class Serving(val port: Int, val token: String) : TransferState
     data class Downloading(val progress: Float) : TransferState
-    data class Complete(
-        val receivedFiles: List<File>,
-        val corruptedFiles: List<String> = emptyList(),
-        val corruptedIndices: List<Int> = emptyList()
-    ) : TransferState
+    /** Every file is saved; checksums are still being verified and arrive on [TransferRepository.fileVerifiedFlow]. */
+    data class Complete(val files: List<DownloadedFile>) : TransferState
     data class Failed(val reason: String) : TransferState
 }
 
@@ -37,8 +34,9 @@ class TransferRepository(
     private val _progressFlow = MutableStateFlow(0f)
     val progressFlow: StateFlow<Float> = _progressFlow.asStateFlow()
 
-    private val _fileVerifiedFlow = MutableStateFlow<Pair<Int, Boolean>?>(null)
-    val fileVerifiedFlow: StateFlow<Pair<Int, Boolean>?> = _fileVerifiedFlow.asStateFlow()
+    // Not a StateFlow: results must never be conflated away (each file's verdict matters)
+    private val _fileVerifiedFlow = kotlinx.coroutines.flow.MutableSharedFlow<Pair<Int, Boolean>>(extraBufferCapacity = 64)
+    val fileVerifiedFlow: kotlinx.coroutines.flow.SharedFlow<Pair<Int, Boolean>> = _fileVerifiedFlow
 
     private var downloadJob: Job? = null
 
@@ -55,7 +53,10 @@ class TransferRepository(
         server.addUri(token, uri)
     }
 
-    fun startDownload(ip: String, port: Int, token: String, fileCount: Int, context: Context) {
+    fun startDownload(
+        ip: String, port: Int, token: String, fileCount: Int, context: Context,
+        indices: List<Int>? = null
+    ) {
         downloadJob?.cancel()
         downloadJob = scope.launch {
             try {
@@ -63,7 +64,7 @@ class TransferRepository(
                 _transferState.value = TransferState.Downloading(0f)
 
                 val destDir = File(context.cacheDir, "transfers")
-                var files: List<File>? = null
+                var files: List<DownloadedFile>? = null
                 var lastError: Exception? = null
                 // First over the real Wi-Fi network (bypasses a VPN), then over the default network.
                 for (viaWifi in listOf(true, false)) {
@@ -72,18 +73,14 @@ class TransferRepository(
                     try {
                         files = client.downloadAll(
                             ip, port, token, fileCount, destDir,
+                            verifyScope = scope,
+                            indices = indices ?: (0 until fileCount).toList(),
                             onProgress = { progress ->
                                 _progressFlow.value = progress
                                 _transferState.value = TransferState.Downloading(progress)
                             },
                             onFileVerified = { index, isValid ->
-                                _fileVerifiedFlow.value = index to isValid
-                            },
-                            onCorrupted = { corrupted, indices ->
-                                val current = _transferState.value
-                                if (current is TransferState.Complete) {
-                                    _transferState.value = current.copy(corruptedFiles = corrupted, corruptedIndices = indices)
-                                }
+                                _fileVerifiedFlow.tryEmit(index to isValid)
                             }
                         )
                         break

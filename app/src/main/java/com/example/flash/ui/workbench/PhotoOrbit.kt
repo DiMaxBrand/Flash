@@ -22,6 +22,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateSetOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -59,8 +60,12 @@ fun PhotoOrbit(
     receivingPhotos: List<Uri> = emptyList(),
     transferProgress: Float = 0f,
     shouldExit: Boolean = false,
-    corruptedIndices: Set<Int> = emptySet(),
-    sendProgress: Float = 0f
+    rejectedPhotos: List<Uri> = emptyList(),
+    sendProgress: Float = 0f,
+    // Good received photos fly from the orbit to these grid-cell centres (px) and grow to the cell size
+    landingTargets: Map<Uri, Offset> = emptyMap(),
+    landingSizePx: Float = 0f,
+    onPhotoLanded: (Uri) -> Unit = {}
 ) {
     val density = LocalDensity.current
 
@@ -152,8 +157,7 @@ fun PhotoOrbit(
                 val phaseOffset = phaseMap[uri] ?: 0f
                 val isExiting = uri in exitingPhotos || shouldExit
                 val isReceiving = uri in receivingPhotos
-                val uriIndex = receivingPhotos.indexOf(uri)
-                val isCorrupted = uriIndex >= 0 && uriIndex in corruptedIndices
+                val rejectIndex = rejectedPhotos.indexOf(uri)
                 OrbitPhotoItem(
                     uri = uri,
                     phaseOffset = phaseOffset,
@@ -166,7 +170,10 @@ fun PhotoOrbit(
                     photoSizePx = photoSizePx,
                     isExiting = isExiting,
                     isReceiving = isReceiving,
-                    isCorrupted = isCorrupted,
+                    rejectIndex = rejectIndex,
+                    landingTarget = landingTargets[uri],
+                    landingSizePx = landingSizePx,
+                    onLanded = { onPhotoLanded(uri) },
                     sendScale = sendScale,
                     sendLit = if (sending && !isReceiving) litProgress else -1f,
                     successProgress = if (isExiting || isReceiving) 0f else successPulse.value,
@@ -194,7 +201,10 @@ private fun OrbitPhotoItem(
     photoSizePx: Float,
     isExiting: Boolean,
     isReceiving: Boolean = false,
-    isCorrupted: Boolean = false,
+    rejectIndex: Int = -1,
+    landingTarget: Offset? = null,
+    landingSizePx: Float = 0f,
+    onLanded: () -> Unit = {},
     successProgress: Float = 0f,
     sendScale: Float = 1f,
     sendLit: Float = -1f,
@@ -235,9 +245,63 @@ private fun OrbitPhotoItem(
     val successX = if (sp > 0.5f) lerp(orbitX, coreCenter.x, (sp - 0.5f) * 2f) else orbitX
     val successY = if (sp > 0.5f) lerp(orbitY, coreCenter.y, (sp - 0.5f) * 2f) else orbitY
 
-    val x     = lerp(lerp(coreCenter.x, successX, ep), coreCenter.x, xp)
-    val y     = lerp(lerp(coreCenter.y, successY, ep), coreCenter.y, xp)
+    val orbitPosX = lerp(lerp(coreCenter.x, successX, ep), coreCenter.x, xp)
+    val orbitPosY = lerp(lerp(coreCenter.y, successY, ep), coreCenter.y, xp)
     val scale = lerp(ep * successScale, 0f, xp)
+
+    // ── Received photo, verified good: fly from where it is orbiting to its grid cell and grow ──
+    // ── Received photo, failed its checksum: turn red and move back into the Mother Core ──
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val baseSizePx = photoSizePx * sendScale
+    val latest = androidx.compose.runtime.rememberUpdatedState(Triple(orbitPosX, orbitPosY, baseSizePx))
+    val landProgress = remember { Animatable(0f) }
+    val rejectProgress = remember { Animatable(0f) }
+    var frozen by remember { mutableStateOf(Triple(0f, 0f, 0f)) }
+    var landed by remember { mutableStateOf(false) }
+
+    LaunchedEffect(landingTarget != null) {
+        if (landingTarget != null) {
+            frozen = latest.value
+            landProgress.animateTo(1f, tween(900, easing = FastOutSlowInEasing))
+            landed = true
+            onLanded()
+        }
+    }
+    val rejected = rejectIndex >= 0
+    LaunchedEffect(rejected) {
+        if (rejected) {
+            frozen = latest.value
+            rejectProgress.animateTo(1f, tween(700, easing = FastOutSlowInEasing))
+        }
+    }
+
+    val lp = landProgress.value
+    val rp = rejectProgress.value
+    // Parked red photos sit inside the core, fanned out a little so several stay visible
+    val parkAngle = rejectIndex * 2.4f
+    val parkX = coreCenter.x + 14f * density.density * cos(parkAngle) * (if (rejectIndex > 0) 1f else 0f)
+    val parkY = coreCenter.y + 14f * density.density * sin(parkAngle) * (if (rejectIndex > 0) 1f else 0f)
+    val x = when {
+        lp > 0f && landingTarget != null -> lerp(frozen.first, landingTarget.x, lp)
+        rp > 0f -> lerp(frozen.first, parkX, rp)
+        else -> orbitPosX
+    }
+    val y = when {
+        lp > 0f && landingTarget != null -> lerp(frozen.second, landingTarget.y, lp)
+        rp > 0f -> lerp(frozen.second, parkY, rp)
+        else -> orbitPosY
+    }
+    val sizePx = when {
+        lp > 0f && landingTarget != null && landingSizePx > 0f -> lerp(frozen.third, landingSizePx, lp)
+        rp > 0f -> lerp(frozen.third, photoSizePx * 0.85f, rp)
+        else -> baseSizePx
+    }
+    val landFade by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (landed) 0f else 1f,
+        animationSpec = tween(180),
+        label = "land_fade"
+    )
+    val isCorrupted = rejected
 
     val photoBlobTime = (blobTime + phaseOffset * 137f).toDouble()
 
@@ -246,17 +310,17 @@ private fun OrbitPhotoItem(
         contentDescription = null,
         contentScale = ContentScale.Crop,
         modifier = Modifier
-            .size(photoSizeDp * sendScale)
+            .size(with(density) { sizePx.toDp() })
             .offset {
                 IntOffset(
-                    (x - photoSizePx * sendScale / 2f).roundToInt(),
-                    (y - photoSizePx * sendScale / 2f).roundToInt()
+                    (x - sizePx / 2f).roundToInt(),
+                    (y - sizePx / 2f).roundToInt()
                 )
             }
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
-                alpha  = scale
+                alpha  = scale * landFade
             }
             .drawWithCache {
                 val path = Path()
@@ -312,11 +376,11 @@ private fun OrbitPhotoItem(
                         }
                     }
 
-                    // Red tint for corrupted photos
+                    // Red for a photo that failed its checksum; deepens as it moves back into the core
                     if (isCorrupted) {
                         clipPath(path) {
                             drawRect(
-                                color = Color.Red.copy(alpha = 0.25f),
+                                color = Color.Red.copy(alpha = 0.25f + 0.40f * rp),
                                 size = this.size
                             )
                         }

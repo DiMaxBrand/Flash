@@ -39,6 +39,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -67,6 +68,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -335,24 +338,30 @@ fun WorkbenchScreen(
 
     var coreCenter   by remember { mutableStateOf(Offset.Zero) }
     var showSettings by remember { mutableStateOf(false) }
-    var shouldStartGalleryTransition by remember { mutableStateOf(false) }
 
     var exitEnabled by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(600L); exitEnabled = true }
 
     // Received photos are added at the top of the grid; make sure the top is what is on screen
     val gridState = rememberLazyGridState()
-    LaunchedEffect(uiState.receivingPhotos.isNotEmpty()) {
-        if (uiState.receivingPhotos.isNotEmpty()) gridState.animateScrollToItem(0)
+    LaunchedEffect(uiState.landingPhotos.isNotEmpty()) {
+        if (uiState.landingPhotos.isNotEmpty()) gridState.animateScrollToItem(0)
     }
 
-    // Auto-trigger gallery transition after receiving photos settle in orbit (~3 seconds)
-    LaunchedEffect(uiState.receivingPhotos) {
-        if (uiState.receivingPhotos.isNotEmpty() && !shouldStartGalleryTransition) {
-            delay(3000L)  // Let them orbit for a bit
-            shouldStartGalleryTransition = true
-            viewModel.startGalleryTransitionForReceivingPhotos()
-        }
+    // Grid geometry (square cells) so received photos can land exactly on their cell
+    val gridCellWidthPx = with(density) {
+        (LocalConfiguration.current.screenWidthDp.dp - 8.dp * 2 - 4.dp * 2).toPx() / 3f
+    }
+    val landingTargets: Map<Uri, Offset> = remember(uiState.landingPhotos, uiState.photos, gridCellWidthPx) {
+        val gap = with(density) { 4.dp.toPx() }
+        val pad = with(density) { 8.dp.toPx() }
+        uiState.landingPhotos.mapNotNull { uri ->
+            val i = uiState.photos.indexOf(uri)
+            if (i < 0) null else uri to Offset(
+                pad + (i % 3) * (gridCellWidthPx + gap) + gridCellWidthPx / 2f,
+                pad + (i / 3) * (gridCellWidthPx + gap) + gridCellWidthPx / 2f
+            )
+        }.toMap()
     }
 
     val screenExitY = remember { Animatable(0f) }
@@ -424,10 +433,12 @@ fun WorkbenchScreen(
                 .fillMaxSize()
                 .layerBackdrop(backdrop)
         ) {
-            items(uiState.photos) { uri ->
+            items(uiState.photos, key = { it.toString() }) { uri ->
                 PhotoGridItem(
                     uri       = uri,
                     isInOrbit = uri in uiState.selectedPhotos,
+                    hidden    = uri in uiState.landingPhotos,
+                    modifier  = Modifier.animateItem(),
                     onTap = {
                         if (uri in uiState.selectedPhotos) viewModel.onPhotoRemovedFromOrbit(uri)
                         else                               viewModel.onPhotoAddedToOrbit(uri, context)
@@ -443,27 +454,21 @@ fun WorkbenchScreen(
             receivingPhotos  = uiState.receivingPhotos,
             transferProgress = uiState.transferProgress,
             shouldExit       = uiState.shouldExit,
-            corruptedIndices = uiState.corruptedIndicesInOrbit,
-            sendProgress     = uiState.sendProgress
+            rejectedPhotos   = uiState.rejectedPhotos,
+            sendProgress     = uiState.sendProgress,
+            landingTargets   = landingTargets,
+            landingSizePx    = gridCellWidthPx,
+            onPhotoLanded    = { viewModel.onPhotoLanded(it) }
         )
 
         // ── Received photos materializing into orbit ─────────────────────────
         uiState.receivingPhotos.forEachIndexed { index, uri ->
-            ReceivedPhotoMaterializeFlyer(
-                uri = uri,
-                coreCenter = coreCenter,
-                phaseOffset = index * (2f * kotlin.math.PI.toFloat() / uiState.receivingPhotos.size)
-                    + (uiState.selectedPhotos.size * GOLDEN_ANGLE)  // offset by existing photos
-            )
-        }
-
-        // ── Received photos flying from orbit into gallery ────────────────────
-        if (uiState.receivingPhotos.isNotEmpty() && shouldStartGalleryTransition) {
-            uiState.receivingPhotos.forEachIndexed { index, uri ->
-                ReceivedPhotoOrbitToGalleryFlyer(
+            key(uri) {
+                ReceivedPhotoMaterializeFlyer(
                     uri = uri,
                     coreCenter = coreCenter,
-                    gridItemIndex = index
+                    phaseOffset = index * (2f * kotlin.math.PI.toFloat() / uiState.receivingPhotos.size)
+                        + (uiState.selectedPhotos.size * GOLDEN_ANGLE)  // offset by existing photos
                 )
             }
         }
@@ -645,6 +650,8 @@ fun WorkbenchScreen(
             // Receiver: tint to the peer's color once locked.
             // Sender: show our own advertised color so the other phone's camera can find it.
             val lockedAccent = when {
+                uiState.rejectedPhotos.isNotEmpty() -> androidx.compose.ui.graphics.Color(0xFFD32F2F)
+                uiState.sessionColor != null -> androidx.compose.ui.graphics.Color(uiState.sessionColor!!)
                 uiState.colorDetectionState == ColorDetectionState.Locked ->
                     uiState.detectedPeerColor?.displayColor?.let { androidx.compose.ui.graphics.Color(it) }
                 uiState.cameraHandshakeEnabled && uiState.selectedPhotos.isNotEmpty() ->
@@ -732,6 +739,20 @@ fun WorkbenchScreen(
                             RoundedCornerShape(16.dp)
                         )
                         .padding(horizontal = 16.dp, vertical = 12.dp)
+                )
+            }
+
+            if (uiState.rejectedPhotos.isNotEmpty()) {
+                androidx.compose.material3.Text(
+                    text = stringResource(R.string.damaged_photos, uiState.rejectedPhotos.size),
+                    color = androidx.compose.ui.graphics.Color.White,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier
+                        .background(
+                            androidx.compose.ui.graphics.Color(0xFFB71C1C).copy(alpha = 0.95f),
+                            RoundedCornerShape(16.dp)
+                        )
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
                 )
             }
 
@@ -1182,11 +1203,21 @@ private fun ReceivedPhotoFlyer(
 private fun PhotoGridItem(
     uri: Uri,
     isInOrbit: Boolean,
-    onTap: () -> Unit
+    onTap: () -> Unit,
+    modifier: Modifier = Modifier,
+    hidden: Boolean = false
 ) {
+    // A received photo's cell stays empty while its flying copy is still on the way
+    val alpha by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (hidden) 0f else 1f,
+        animationSpec = tween(180),
+        label = "cell_alpha"
+    )
     Box(
-        modifier = Modifier
-            .size(100.dp)
+        modifier = modifier
+            .fillMaxWidth()
+            .aspectRatio(1f)   // square cells: a flying photo lands exactly on its cell
+            .graphicsLayer { this.alpha = alpha }
             .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onTap)
     ) {
@@ -1233,7 +1264,7 @@ private fun CorruptionAlert(
                     .wrapContentHeight()
                     .clip(RoundedCornerShape(20.dp))
                     .background(
-                        color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.95f)
+                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.97f)
                     )
                     .drawBackdrop(
                         backdrop = backdrop,
@@ -1243,7 +1274,7 @@ private fun CorruptionAlert(
                             blur(6f.dp.toPx())
                         },
                         onDrawSurface = {
-                            drawRect(OceanAqua.copy(alpha = 0.05f))
+                            drawRect(Color.Red.copy(alpha = 0.06f))
                         }
                     )
                     .padding(24.dp)
@@ -1255,13 +1286,13 @@ private fun CorruptionAlert(
                     Text(
                         text = stringResource(R.string.corruption_title),
                         style = MaterialTheme.typography.headlineSmall,
-                        color = MaterialTheme.colorScheme.onSurface,
+                        color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.padding(bottom = 8.dp)
                     )
                     Text(
                         text = stringResource(R.string.corruption_subtitle),
                         style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
                         modifier = Modifier.padding(bottom = 16.dp)
                     )
 

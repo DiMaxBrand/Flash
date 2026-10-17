@@ -28,6 +28,7 @@
     <string name="cd_core">Главное ядро</string>
     <string name="hce_service_desc">Служба рукопожатия Flash</string>
     <string name="hce_aid_group_desc">NFC рукопожатие Flash</string>
+    <string name="damaged_photos">Повреждено фото: %1$d</string>
     <string name="corruption_title">Сеть сказала спасибо, нет</string>
     <string name="corruption_subtitle">Эти фото не пережили путь</string>
     <string name="corruption_description">Удалены, чтобы пожалеть вас. Сеть сказала, что они подозрительные.</string>
