@@ -50,6 +50,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.wrapContentHeight
@@ -80,6 +81,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -308,6 +310,12 @@ fun WorkbenchScreen(
     var exitEnabled by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(600L); exitEnabled = true }
 
+    // Received photos are added at the top of the grid; make sure the top is what is on screen
+    val gridState = rememberLazyGridState()
+    LaunchedEffect(uiState.receivingPhotos.isNotEmpty()) {
+        if (uiState.receivingPhotos.isNotEmpty()) gridState.animateScrollToItem(0)
+    }
+
     // Auto-trigger gallery transition after receiving photos settle in orbit (~3 seconds)
     LaunchedEffect(uiState.receivingPhotos) {
         if (uiState.receivingPhotos.isNotEmpty() && !shouldStartGalleryTransition) {
@@ -356,6 +364,7 @@ fun WorkbenchScreen(
         ) {
         // ── Full-screen photo grid — source for all glass effects ────────────
         LazyVerticalGrid(
+            state = gridState,
             columns = GridCells.Fixed(3),
             contentPadding = PaddingValues(8.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -977,9 +986,11 @@ private fun ReceivedPhotoOrbitToGalleryFlyer(
     val gapDp = 4.dp
     val col = gridItemIndex % 3
     val row = gridItemIndex / 3
+    // Real grid columns are (screen width - padding - gaps) / 3 wide; items are 100dp inside them
+    val cellWidthDp = (LocalConfiguration.current.screenWidthDp.dp - paddingDp * 2 - gapDp * 2) / 3
 
     val targetX = with(density) {
-        paddingDp.toPx() + col * (gridItemSizeDp.toPx() + gapDp.toPx()) + gridItemSizeDp.toPx() / 2f
+        paddingDp.toPx() + col * (cellWidthDp.toPx() + gapDp.toPx()) + gridItemSizeDp.toPx() / 2f
     }
     val targetY = with(density) {
         paddingDp.toPx() + row * (gridItemSizeDp.toPx() + gapDp.toPx()) + gridItemSizeDp.toPx() / 2f
@@ -1035,9 +1046,11 @@ private fun ReceivedPhotoFlyer(
     val gapDp = 4.dp
     val col = gridItemIndex % 3
     val row = gridItemIndex / 3
+    // Real grid columns are (screen width - padding - gaps) / 3 wide; items are 100dp inside them
+    val cellWidthDp = (LocalConfiguration.current.screenWidthDp.dp - paddingDp * 2 - gapDp * 2) / 3
 
     val targetX = with(density) {
-        paddingDp.toPx() + col * (gridItemSizeDp.toPx() + gapDp.toPx()) + gridItemSizeDp.toPx() / 2f
+        paddingDp.toPx() + col * (cellWidthDp.toPx() + gapDp.toPx()) + gridItemSizeDp.toPx() / 2f
     }
     val targetY = with(density) {
         paddingDp.toPx() + row * (gridItemSizeDp.toPx() + gapDp.toPx()) + gridItemSizeDp.toPx() / 2f

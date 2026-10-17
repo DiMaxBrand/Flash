@@ -1,36 +1,33 @@
 package com.example.flash.handshake
 
-import android.graphics.Bitmap
 import android.graphics.Color
 import android.util.Log
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.compose.foundation.Canvas
+import androidx.camera.view.PreviewView
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.FilterQuality
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.compose.foundation.shape.CircleShape
 import java.util.concurrent.Executors
 import kotlin.math.abs
-import kotlin.math.max
 
 /**
  * Analyzes camera frames using real YUV chroma channels.
@@ -130,45 +127,9 @@ class ColorMatcher(private val targetColor: Int) {
 }
 
 /**
- * Converts a YUV_420_888 camera frame to a small ARGB bitmap (about [outWidth] px wide, sensor
- * orientation) so it can be drawn inside MotherCore's morphing blob.
- */
-private fun yuvToBitmap(
-    yData: ByteArray, uData: ByteArray, vData: ByteArray,
-    width: Int, height: Int,
-    yRowStride: Int, uvRowStride: Int, uvPixelStride: Int,
-    outWidth: Int = 200
-): Bitmap {
-    val step = max(1, width / outWidth)
-    val ow = width / step
-    val oh = height / step
-    val pixels = IntArray(ow * oh)
-    for (j in 0 until oh) {
-        val y = j * step
-        for (i in 0 until ow) {
-            val x = i * step
-            val yIdx = y * yRowStride + x
-            val uvIdx = (y / 2) * uvRowStride + (x / 2) * uvPixelStride
-            if (yIdx >= yData.size || uvIdx >= uData.size || uvIdx >= vData.size) continue
-            val yv = (yData[yIdx].toInt() and 0xFF) - 16
-            val uv = (uData[uvIdx].toInt() and 0xFF) - 128
-            val vv = (vData[uvIdx].toInt() and 0xFF) - 128
-            val r = ((298 * yv + 409 * vv + 128) shr 8).coerceIn(0, 255)
-            val g = ((298 * yv - 100 * uv - 208 * vv + 128) shr 8).coerceIn(0, 255)
-            val b = ((298 * yv + 516 * uv + 128) shr 8).coerceIn(0, 255)
-            pixels[j * ow + i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
-        }
-    }
-    return Bitmap.createBitmap(pixels, ow, oh, Bitmap.Config.ARGB_8888)
-}
-
-/**
- * Live camera view that fills whatever clips it (MotherCore clips it to the morphing blob).
- *
- * The frames are drawn with a plain Compose [Canvas] from the analysis stream instead of a
- * PreviewView: a TextureView/SurfaceView inside a shape clip rendered black on some phones
- * (Samsung) while the colour analysis kept working. Colour matching starts once [targetColor]
- * is known; callbacks fire on the main thread.
+ * Live camera viewfinder clipped to a circle matching MotherCore's size.
+ * Placed behind MotherCore so the blob shape frames the camera feed.
+ * Color analysis runs in background — callbacks fire on main thread.
  */
 @Composable
 fun MotherCoreViewfinder(
@@ -179,127 +140,106 @@ fun MotherCoreViewfinder(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    var cameraProvider by remember { mutableStateOf<ProcessCameraProvider?>(null) }
     val executor = remember { Executors.newSingleThreadExecutor() }
+    // The preview runs as soon as the viewfinder is shown; color matching only starts
+    // once a sender (and therefore a target color) is known.
     val currentTarget by rememberUpdatedState(targetColor)
-    var frame by remember { mutableStateOf<Bitmap?>(null) }
-    var rotation by remember { mutableIntStateOf(0) }
 
-    DisposableEffect(lifecycleOwner) {
-        var provider: ProcessCameraProvider? = null
-        var colorMatcher: ColorMatcher? = null
-        var matcherColor: Int? = null
-        var locked = false
-        var lastFrameMs = 0L
-        var disposed = false
-        val mainExecutor = ContextCompat.getMainExecutor(context)
+    LaunchedEffect(Unit) {
+        ProcessCameraProvider.getInstance(context).addListener({
+            cameraProvider = ProcessCameraProvider.getInstance(context).get()
+        }, ContextCompat.getMainExecutor(context))
+    }
 
-        val analysis = ImageAnalysis.Builder()
-            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
-            .build()
-            .apply {
-                setAnalyzer(executor) { imageProxy ->
-                    try {
-                        val planes = imageProxy.planes
-                        val yPlane = planes[0]
-                        val uPlane = planes[1]
-                        val vPlane = planes[2]
-                        val yData = ByteArray(yPlane.buffer.remaining()).also { yPlane.buffer.get(it) }
-                        val uData = ByteArray(uPlane.buffer.remaining()).also { uPlane.buffer.get(it) }
-                        val vData = ByteArray(vPlane.buffer.remaining()).also { vPlane.buffer.get(it) }
-                        val w = imageProxy.width
-                        val h = imageProxy.height
-
-                        // Picture for the blob (about 15 fps is plenty)
-                        val now = System.currentTimeMillis()
-                        if (now - lastFrameMs >= 66) {
-                            lastFrameMs = now
-                            val bitmap = yuvToBitmap(
-                                yData, uData, vData, w, h,
-                                yPlane.rowStride, uPlane.rowStride, uPlane.pixelStride
-                            )
-                            val degrees = imageProxy.imageInfo.rotationDegrees
-                            mainExecutor.execute {
-                                if (!disposed) { frame = bitmap; rotation = degrees }
-                            }
-                        }
-
-                        // Colour match, once a sender's colour is known
-                        val target = currentTarget
-                        if (target == null) {
-                            colorMatcher = null
-                            matcherColor = null
-                        } else {
-                            if (matcherColor != target) {
-                                colorMatcher = ColorMatcher(target)
-                                matcherColor = target
-                            }
-                            val matcher = colorMatcher
-                            if (matcher != null) {
-                                val confirmed = matcher.analyzeFrame(
-                                    yData, uData, vData, w, h,
-                                    yPlane.rowStride, uPlane.rowStride, uPlane.pixelStride
-                                )
-                                mainExecutor.execute {
-                                    if (disposed) return@execute
-                                    onMatchStrengthChanged(matcher.lastMatchStrength)
-                                    if (confirmed && !locked) {
-                                        locked = true
-                                        onColorLocked()
-                                    }
-                                }
-                            }
-                        }
-                    } catch (e: Exception) {
-                        Log.e("ColorDetection", "Frame error", e)
-                    } finally {
-                        imageProxy.close()
-                    }
-                }
-            }
-
-        val future = ProcessCameraProvider.getInstance(context)
-        future.addListener({
-            if (disposed) return@addListener
-            try {
-                provider = future.get()
-                provider?.unbindAll()
-                provider?.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, analysis)
-            } catch (e: Exception) {
-                Log.e("ColorDetection", "Camera bind failed", e)
-            }
-        }, mainExecutor)
-
+    DisposableEffect(Unit) {
         onDispose {
-            disposed = true
-            provider?.unbindAll()
-            analysis.clearAnalyzer()
             executor.shutdown()
+            cameraProvider?.unbindAll()
         }
     }
 
+    // Fills whatever clips it; MotherCore clips this to its morphing blob shape.
     Box(modifier = modifier.fillMaxSize()) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val bmp = frame ?: return@Canvas
-            val rot = rotation
-            val quarterTurn = rot % 180 != 0
-            val bw = if (quarterTurn) bmp.height else bmp.width
-            val bh = if (quarterTurn) bmp.width else bmp.height
-            val fillScale = max(size.width / bw, size.height / bh)   // fill (centre crop)
-            withTransform({
-                translate(size.width / 2f, size.height / 2f)
-                rotate(rot.toFloat(), Offset.Zero)
-                scale(fillScale, fillScale, Offset.Zero)
-            }) {
-                drawImage(
-                    image = bmp.asImageBitmap(),
-                    srcOffset = IntOffset.Zero,
-                    srcSize = IntSize(bmp.width, bmp.height),
-                    dstOffset = IntOffset(-bmp.width / 2, -bmp.height / 2),
-                    dstSize = IntSize(bmp.width, bmp.height),
-                    filterQuality = FilterQuality.Low
-                )
-            }
+        if (cameraProvider != null) {
+            AndroidView(
+                factory = { ctx ->
+                    PreviewView(ctx).apply {
+                        // TextureView-backed so the blob clip applies (SurfaceView ignores it)
+                        implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+                        val preview = Preview.Builder().build()
+                        var colorMatcher: ColorMatcher? = null
+                        var matcherColor: Int? = null
+                        var locked = false
+
+                        val imageAnalysis = ImageAnalysis.Builder()
+                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
+                            .build()
+                            .apply {
+                                setAnalyzer(executor) { imageProxy ->
+                                    try {
+                                        val target = currentTarget
+                                        if (target == null) {
+                                            colorMatcher = null
+                                            matcherColor = null
+                                            return@setAnalyzer
+                                        }
+                                        if (matcherColor != target) {
+                                            colorMatcher = ColorMatcher(target)
+                                            matcherColor = target
+                                        }
+                                        val matcher = colorMatcher ?: return@setAnalyzer
+                                        val planes = imageProxy.planes
+                                        val yPlane = planes[0]
+                                        val uPlane = planes[1]
+                                        val vPlane = planes[2]
+
+                                        val yBuf = yPlane.buffer
+                                        val uBuf = uPlane.buffer
+                                        val vBuf = vPlane.buffer
+
+                                        val yData = ByteArray(yBuf.remaining()).also { yBuf.get(it) }
+                                        val uData = ByteArray(uBuf.remaining()).also { uBuf.get(it) }
+                                        val vData = ByteArray(vBuf.remaining()).also { vBuf.get(it) }
+
+                                        val confirmed = matcher.analyzeFrame(
+                                            yData, uData, vData,
+                                            imageProxy.width, imageProxy.height,
+                                            yPlane.rowStride, uPlane.rowStride, uPlane.pixelStride
+                                        )
+
+                                        ContextCompat.getMainExecutor(ctx).execute {
+                                            onMatchStrengthChanged(matcher.lastMatchStrength)
+                                            if (confirmed && !locked) {
+                                                locked = true
+                                                onColorLocked()
+                                            }
+                                        }
+                                    } catch (e: Exception) {
+                                        Log.e("ColorDetection", "Frame error", e)
+                                    } finally {
+                                        imageProxy.close()
+                                    }
+                                }
+                            }
+
+                        try {
+                            cameraProvider?.unbindAll()
+                            cameraProvider?.bindToLifecycle(
+                                lifecycleOwner,
+                                CameraSelector.DEFAULT_BACK_CAMERA,
+                                preview,
+                                imageAnalysis
+                            )
+                            preview.surfaceProvider = this.surfaceProvider
+                        } catch (e: Exception) {
+                            Log.e("ColorDetection", "Camera bind failed", e)
+                        }
+                    }
+                },
+                modifier = Modifier.matchParentSize()
+            )
         }
     }
 }

@@ -138,7 +138,7 @@ class WorkbenchViewModel(
                     }
                     _uiState.update { state ->
                         state.copy(
-                            photos = (state.photos + photoUri).distinct(),
+                            photos = (listOf(photoUri) + state.photos).distinct(),
                             receivingPhotos = state.receivingPhotos - photoUri
                         )
                     }
@@ -485,7 +485,7 @@ class WorkbenchViewModel(
         if (receiving.isNotEmpty()) {
             _uiState.update {
                 it.copy(
-                    photos = (it.photos + receiving).distinct(),
+                    photos = (receiving + it.photos).distinct(),
                     receivingPhotos = emptyList()
                 )
             }

@@ -327,7 +327,7 @@ fun updateFrame(yuv: ByteArray) {
     // 3. Sustained match ≥ 1000ms (no flickering false positives)
 }
 ```
-- In camera mode a receiver (no photos selected, not mid-transfer) shows the live back-camera preview immediately; color matching starts once a sender is discovered over mDNS (state `Detecting`). `MotherCore(viewfinderContent = { MotherCoreViewfinder(...) })` clips the live view to the morphing blob path itself (no static circle). The view is drawn on a plain Compose Canvas from the ImageAnalysis frames (YUV→small bitmap, ~15 fps) — NOT a PreviewView: TextureView/SurfaceView inside the shape clip rendered black on the user's Samsung while colour matching kept working and skips its opaque lens layer and glow
+- In camera mode a receiver (no photos selected, not mid-transfer) shows the live back-camera preview immediately; color matching starts once a sender is discovered over mDNS (state `Detecting`). `MotherCore(viewfinderContent = { MotherCoreViewfinder(...) })` clips the live view to the morphing blob path itself (no static circle). The view is a `PreviewView` in COMPATIBLE (TextureView) mode inside the blob clip. It works on the user's Samsung — a black blob there just means the camera is pointing at something dark (it looked like a bug once; it wasn't). The core skips its opaque lens layer and glow
 - Continuously analyzes YUV frames for dominant color
 - Only locks when all 3 conditions sustained for 1 second
 
@@ -370,6 +370,10 @@ Settings has a **Pairing method** row (`HandshakeMode`: AUTO / NFC / CAMERA, sto
 - Downloads land in `cacheDir/transfers/` (Android may clear it). After each file passes its checksum, `WorkbenchViewModel.saveToGallery()` copies it into MediaStore `Pictures/Flash` (Android 10+: no permission; Android 8–9: written straight to Pictures/Flash with WRITE_EXTERNAL_STORAGE, requested with the gallery permission) and a green "Saved to Pictures/Flash" message shows. The in-app Uri is left as the cache file on purpose so the orbit doesn't swap items.
 - The "No Wi-Fi?" hotspot dialog is driven by `updateWifiStatus()`, polled every 1.5 s from `WorkbenchScreen`. "Connected" = `LocalNetwork.localIpv4() != null` (joined to Wi-Fi, even under a VPN, or hosting a hotspot). Dismissing it keeps it dismissed until a connection is seen and lost again.
 - Settings shows `Flash <versionName> (build <versionCode>)` so a screenshot/recording can be matched to a release.
+
+## Receiving animation & grid
+
+Received photos are added to the FRONT of the grid (`photos = received + photos`), the grid is scrolled to the top, and `ReceivedPhotoOrbitToGalleryFlyer` lands on the real top cell (column width = (screen − padding − gaps) / 3; items are 100 dp inside it). Appending to the end put the photo off-screen, so the flyer overlapped an unrelated photo and then it seemed to vanish into the void.
 
 ## Network Corruption Detection & Recovery
 
