@@ -6,6 +6,8 @@ import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.get
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsChannel
+import io.ktor.client.statement.bodyAsText
+import io.ktor.client.call.body
 import io.ktor.http.HttpHeaders
 import io.ktor.http.isSuccess
 import io.ktor.utils.io.readAvailable
@@ -16,6 +18,13 @@ import kotlinx.coroutines.supervisorScope
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
+
+/** Size and a tiny blurred thumbnail the sender announces for each photo (preview space is pw x ph). */
+class FileMeta(
+    val index: Int, val width: Int, val height: Int,
+    val previewWidth: Int, val previewHeight: Int, val bandCount: Int,
+    val thumb: ByteArray
+)
 
 /** A file saved by [FileClient.download]; [index] is its position on the sender. */
 data class DownloadedFile(val index: Int, val file: File, val expectedChecksum: String?)
@@ -86,6 +95,28 @@ class FileClient {
         }
         return downloaded
     }
+
+    /** Asks the sender for photo sizes and tiny thumbnails; null if it is an older sender without previews. */
+    suspend fun fetchMeta(ip: String, port: Int, token: String): List<FileMeta>? = runCatching {
+        val response = client.get("http://$ip:$port/meta/$token")
+        if (!response.status.isSuccess()) return null
+        val files = org.json.JSONObject(response.bodyAsText()).getJSONArray("files")
+        (0 until files.length()).map { i ->
+            val o = files.getJSONObject(i)
+            FileMeta(
+                index = o.getInt("i"), width = o.getInt("w"), height = o.getInt("h"),
+                previewWidth = o.getInt("pw"), previewHeight = o.getInt("ph"), bandCount = o.getInt("bands"),
+                thumb = android.util.Base64.decode(o.getString("thumb"), android.util.Base64.DEFAULT)
+            )
+        }
+    }.getOrNull()
+
+    /** One horizontal band of a photo's display preview (n = 0 is the bottom band), or null. */
+    suspend fun fetchBand(ip: String, port: Int, token: String, index: Int, n: Int): ByteArray? = runCatching {
+        val response = client.get("http://$ip:$port/band/$token/$index/$n")
+        if (!response.status.isSuccess()) return null
+        response.body<ByteArray>()
+    }.getOrNull()
 
     suspend fun download(
         ip: String,

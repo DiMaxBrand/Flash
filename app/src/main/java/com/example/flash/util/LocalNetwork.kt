@@ -77,13 +77,21 @@ object LocalNetwork {
     }
 
     /** Sends this process's new sockets over Wi-Fi, bypassing a VPN. Pair with [unbind]. */
+    private var bindCount = 0
+
+    /** Reference counted: the download and the preview fetches overlap, so only the last [unbind] releases it. */
+    @Synchronized
     fun bindProcessToWifi(context: Context): Boolean = runCatching {
         val wifi = wifiNetwork(context) ?: return false
-        cm(context).bindProcessToNetwork(wifi)
+        val ok = cm(context).bindProcessToNetwork(wifi)
+        if (ok) bindCount++
+        ok
     }.getOrDefault(false)
 
+    @Synchronized
     fun unbind(context: Context) {
-        runCatching { cm(context).bindProcessToNetwork(null) }
+        if (bindCount > 0) bindCount--
+        if (bindCount == 0) runCatching { cm(context).bindProcessToNetwork(null) }
     }
 
     /**

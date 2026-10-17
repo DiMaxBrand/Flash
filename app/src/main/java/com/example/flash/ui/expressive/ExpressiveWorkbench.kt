@@ -5,7 +5,13 @@ import android.content.Intent
 import android.os.Build
 import android.provider.Settings
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
@@ -62,7 +68,9 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -90,6 +98,7 @@ import com.example.flash.ui.theme.ThemeMode
 import com.example.flash.ui.theme.ThemeRepository
 import com.example.flash.ui.theme.UiStyle
 import com.example.flash.ui.workbench.ColorDetectionState
+import com.example.flash.ui.workbench.IncomingPhoto
 import com.example.flash.ui.workbench.WorkbenchUiState
 import com.example.flash.ui.workbench.WorkbenchViewModel
 import kotlinx.coroutines.delay
@@ -155,6 +164,35 @@ fun ExpressiveWorkbench(
         state.selectedPhotos.isEmpty() && !state.isReceiving &&
         state.colorDetectionState != ColorDetectionState.Locked
 
+    // ── Reveal cards: which photos are shown big, and when every reveal is finished ──────────────
+    val incoming = state.incoming
+    val bigIncoming: List<IncomingPhoto> = when {
+        incoming.isEmpty() -> emptyList()
+        incoming.size <= 2 -> incoming
+        else -> incoming.filter { it.open }
+    }
+    val bigSending: List<android.net.Uri> =
+        if (incoming.isEmpty() && !state.isReceiving && state.selectedPhotos.size in 1..2) state.selectedPhotos.toList()
+        else emptyList()
+    val bigMode = bigIncoming.isNotEmpty() || bigSending.isNotEmpty()
+
+    DisposableEffect(Unit) {
+        viewModel.setHoldLanding(true)   // photos stay as cards until their reveal is over
+        onDispose { viewModel.setHoldLanding(false) }
+    }
+    val revealed = remember { mutableStateListOf<Int>() }
+    val onRevealed: (Int) -> Unit = { index -> if (index !in revealed) revealed.add(index) }
+    LaunchedEffect(incoming.isEmpty()) { if (incoming.isEmpty()) revealed.clear() }
+    LaunchedEffect(revealed.size, incoming.map { it.verified }, incoming.size) {
+        if (incoming.isNotEmpty() && incoming.all { it.index in revealed || it.verified == false }) {
+            viewModel.onRevealFinished()
+        }
+    }
+    // An older sender without previews: nothing to reveal, let the photos settle right away
+    LaunchedEffect(state.receivingPhotos.isNotEmpty(), incoming.isEmpty()) {
+        if (state.receivingPhotos.isNotEmpty() && incoming.isEmpty()) viewModel.onRevealFinished()
+    }
+
     MaterialExpressiveTheme(
         colorScheme = scheme,
         motionScheme = MotionScheme.expressive(),
@@ -187,51 +225,29 @@ fun ExpressiveWorkbench(
                         state = state,
                         viewfinderActive = viewfinderActive,
                         viewModel = viewModel,
+                        bigIndices = bigIncoming.map { it.index }.toSet(),
+                        onRevealed = onRevealed,
                         onRemove = { viewModel.onPhotoRemovedFromOrbit(it) }
                     )
-                    LazyVerticalGrid(
-                        columns = GridCells.Adaptive(104.dp),
-                        contentPadding = PaddingValues(12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxSize()
-                    ) {
-                        items(state.photos, key = { it.toString() }) { uri ->
-                            val selected = uri in state.selectedPhotos
-                            Box(
-                                Modifier
-                                    .aspectRatio(1f)
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .clickable {
-                                        if (selected) viewModel.onPhotoRemovedFromOrbit(uri)
-                                        else viewModel.onPhotoAddedToOrbit(uri, context)
-                                    }
-                            ) {
-                                AsyncImage(
-                                    model = uri,
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                                if (selected) {
-                                    Box(
-                                        Modifier
-                                            .fillMaxSize()
-                                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
-                                    )
-                                    Icon(
-                                        Icons.Default.Check,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onPrimary,
-                                        modifier = Modifier
-                                            .align(Alignment.TopEnd)
-                                            .padding(6.dp)
-                                            .size(24.dp)
-                                            .background(MaterialTheme.colorScheme.primary, CircleShape)
-                                            .padding(3.dp)
-                                    )
-                                }
-                            }
+                    AnimatedContent(
+                        targetState = bigMode,
+                        transitionSpec = {
+                            (fadeIn(spring(stiffness = Spring.StiffnessLow)) + scaleIn(initialScale = 0.94f)) togetherWith
+                                (fadeOut() + scaleOut(targetScale = 0.8f))   // big cards shrink away into the grid
+                        },
+                        modifier = Modifier.fillMaxSize(),
+                        label = "main_area"
+                    ) { big ->
+                        if (big) {
+                            BigCards(
+                                state = state,
+                                viewModel = viewModel,
+                                bigIncoming = bigIncoming,
+                                bigSending = bigSending,
+                                onRevealed = onRevealed
+                            )
+                        } else {
+                            PhotoGridArea(state, viewModel)
                         }
                     }
                 }
@@ -353,6 +369,8 @@ private fun Tray(
     state: WorkbenchUiState,
     viewfinderActive: Boolean,
     viewModel: WorkbenchViewModel,
+    bigIndices: Set<Int>,
+    onRevealed: (Int) -> Unit,
     onRemove: (android.net.Uri) -> Unit
 ) {
     val receiving = state.isReceiving || state.receivingPhotos.isNotEmpty()
@@ -366,6 +384,7 @@ private fun Tray(
     val cookie = MaterialShapes.Cookie9Sided.toShape()
     val sender = state.selectedPhotos.isNotEmpty() && !receiving
     val tiles = if (state.receivingPhotos.isNotEmpty()) state.receivingPhotos else state.selectedPhotos.toList()
+    val incomingTiles = state.incoming
 
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -417,7 +436,30 @@ private fun Tray(
                 )
             }
 
-            if (tiles.isEmpty()) {
+            if (incomingTiles.isNotEmpty()) {
+                // Photos on their way: thumbnail first, then they wipe up once complete. Tap to open one big.
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(incomingTiles, key = { it.index }) { photo ->
+                        RevealCard(
+                            photo = photo,
+                            useBands = false,
+                            holdMs = 0,
+                            cropToFill = true,
+                            rejected = photo.verified == false,
+                            // A photo shown big reports through its big card instead
+                            onFullyRevealed = { if (photo.index !in bigIndices) onRevealed(photo.index) },
+                            modifier = Modifier
+                                .size(96.dp)
+                                .clickable(enabled = incomingTiles.size > 2) {
+                                    if (photo.open) viewModel.closeIncoming(photo.index) else viewModel.openIncoming(photo.index)
+                                }
+                        )
+                    }
+                }
+            } else if (tiles.isEmpty()) {
                 Text(
                     text = "Tap photos below to add them here",
                     style = MaterialTheme.typography.bodyMedium,
@@ -612,5 +654,101 @@ private fun SettingsContent(themeRepository: ThemeRepository) {
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Spacer(Modifier.height(16.dp))
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun PhotoGridArea(state: WorkbenchUiState, viewModel: WorkbenchViewModel) {
+    val context = LocalContext.current
+    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(104.dp),
+                        contentPadding = PaddingValues(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        items(state.photos, key = { it.toString() }) { uri ->
+                            val selected = uri in state.selectedPhotos
+                            Box(
+                                Modifier
+                                    .animateItem()   // neighbours glide apart when a photo is inserted
+                                    .aspectRatio(1f)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .clickable {
+                                        if (selected) viewModel.onPhotoRemovedFromOrbit(uri)
+                                        else viewModel.onPhotoAddedToOrbit(uri, context)
+                                    }
+                            ) {
+                                AsyncImage(
+                                    model = uri,
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                                if (selected) {
+                                    Box(
+                                        Modifier
+                                            .fillMaxSize()
+                                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
+                                    )
+                                    Icon(
+                                        Icons.Default.Check,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onPrimary,
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .padding(6.dp)
+                                            .size(24.dp)
+                                            .background(MaterialTheme.colorScheme.primary, CircleShape)
+                                            .padding(3.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+}
+
+/** One or two photos (or a tray photo you tapped) shown almost full screen, stacked one above the other. */
+@Composable
+private fun BigCards(
+    state: WorkbenchUiState,
+    viewModel: WorkbenchViewModel,
+    bigIncoming: List<IncomingPhoto>,
+    bigSending: List<android.net.Uri>,
+    onRevealed: (Int) -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        if (bigIncoming.isNotEmpty()) {
+            bigIncoming.forEach { photo ->
+                FittedCard(
+                    aspect = photo.aspect,
+                    modifier = Modifier.weight(1f).fillMaxWidth()
+                ) { cardModifier ->
+                    RevealCard(
+                        photo = photo,
+                        useBands = true,
+                        holdMs = 1500,
+                        cropToFill = false,
+                        rejected = photo.verified == false,
+                        onFullyRevealed = { onRevealed(photo.index) },
+                        modifier = cardModifier.clickable(enabled = state.incoming.size > 2) {
+                            viewModel.closeIncoming(photo.index)   // tapping an opened tray photo closes it again
+                        }
+                    )
+                }
+            }
+        } else {
+            bigSending.forEach { uri ->
+                SendCard(
+                    uri = uri,
+                    progress = if (state.sendProgress > 0f) state.sendProgress else -1f,
+                    modifier = Modifier.weight(1f).fillMaxWidth()
+                )
+            }
+        }
     }
 }

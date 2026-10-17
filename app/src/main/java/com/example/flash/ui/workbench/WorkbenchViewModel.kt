@@ -57,6 +57,7 @@ data class WorkbenchUiState(
     val receivedPhotos: List<Uri> = emptyList(),
     val receivingPhotos: List<Uri> = emptyList(),
     val corruptedPhotos: List<Uri> = emptyList(),
+    val incoming: List<IncomingPhoto> = emptyList(),   // photos on their way here (Expressive cards)
     val sessionColor: Int? = null,                   // the sender's colour, kept for the whole receive session
     val landingPhotos: Set<Uri> = emptySet(),        // good photos currently flying into the grid
     val rejectedPhotos: List<Uri> = emptyList(),     // failed their checksum: red, parked in the core
@@ -127,11 +128,85 @@ class WorkbenchViewModel(
         // Checksum verdicts arrive while the receiving animation plays; they are only recorded here
         // and acted on once the photos have orbited for ORBIT_MIN_MS (see settleReceivedPhotos).
         transferRepository.fileVerifiedFlow
-            .onEach { (index, isValid) -> verifyResults[index] = isValid }
+            .onEach { (index, isValid) ->
+                verifyResults[index] = isValid
+                updateIncoming(index) { it.copy(verified = isValid) }
+            }
             .launchIn(viewModelScope)
     }
 
     private val verifyResults = java.util.concurrent.ConcurrentHashMap<Int, Boolean>()
+
+    // ── Expressive cards: previews and bands fetched from the sender while the original downloads ──
+    @Volatile private var holdLanding = false
+    @Volatile private var revealDone = false
+    private var previewJob: kotlinx.coroutines.Job? = null
+
+    /** The Expressive screen shows reveal cards and tells us (onRevealFinished) when they are done. */
+    fun setHoldLanding(hold: Boolean) { holdLanding = hold }
+    fun onRevealFinished() { revealDone = true }
+
+    private fun updateIncoming(index: Int, change: (IncomingPhoto) -> IncomingPhoto) {
+        _uiState.update { s ->
+            if (s.incoming.none { it.index == index }) s
+            else s.copy(incoming = s.incoming.map { if (it.index == index) change(it) else it })
+        }
+    }
+
+    private fun launchPreviews(handshake: PeerHandshake, indices: List<Int>?) {
+        previewJob?.cancel()
+        previewJob = viewModelScope.launch(Dispatchers.IO) {
+            val app = FlashApplication.instance
+            val bound = LocalNetwork.bindProcessToWifi(app)
+            try {
+                val meta = transferRepository.fetchMeta(handshake.ip, handshake.port, handshake.token) ?: return@launch
+                val wanted = meta.filter { indices == null || it.index in indices }
+                val list = wanted.map { m ->
+                    IncomingPhoto(
+                        index = m.index, width = m.width, height = m.height,
+                        previewWidth = m.previewWidth, previewHeight = m.previewHeight, bandCount = m.bandCount,
+                        thumb = BitmapFactory.decodeByteArray(m.thumb, 0, m.thumb.size),
+                        open = wanted.size <= 2   // one or two photos are shown big right away
+                    )
+                }
+                // Keep whatever the original download has already reported
+                _uiState.update { it.copy(incoming = list) }
+                kotlinx.coroutines.coroutineScope {
+                    list.filter { it.open }.forEach { p -> launch { fetchBands(handshake, p) } }
+                }
+            } finally {
+                if (bound) LocalNetwork.unbind(app)
+            }
+        }
+    }
+
+    /** Fetches the bands a big card needs, bottom first. Photos that are not open never request any. */
+    private suspend fun fetchBands(handshake: PeerHandshake, photo: IncomingPhoto) {
+        val bandHeight = (photo.previewHeight + photo.bandCount - 1) / photo.bandCount
+        for (n in 0 until photo.bandCount) {
+            val have = _uiState.value.incoming.firstOrNull { it.index == photo.index }?.bands?.containsKey(n) == true
+            if (have) continue
+            val bytes = transferRepository.fetchBand(handshake.ip, handshake.port, handshake.token, photo.index, n) ?: break
+            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: break
+            val yBottom = photo.previewHeight - n * bandHeight
+            val yTop = maxOf(0, yBottom - bandHeight)
+            updateIncoming(photo.index) { it.copy(bands = it.bands + (n to BandImage(n, yTop, yBottom - yTop, bitmap))) }
+        }
+    }
+
+    /** Tapping a tray photo opens it big; only now are its bands requested. */
+    fun openIncoming(index: Int) {
+        val photo = _uiState.value.incoming.firstOrNull { it.index == index } ?: return
+        updateIncoming(index) { it.copy(open = true) }
+        val handshake = lastDownload ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            val app = FlashApplication.instance
+            val bound = LocalNetwork.bindProcessToWifi(app)
+            try { fetchBands(handshake, photo) } finally { if (bound) LocalNetwork.unbind(app) }
+        }
+    }
+
+    fun closeIncoming(index: Int) = updateIncoming(index) { it.copy(open = false) }
     private var lastDownload: PeerHandshake? = null
     private var failedIndices: List<Int> = emptyList()
     private var receiveJob: kotlinx.coroutines.Job? = null
@@ -173,7 +248,12 @@ class WorkbenchViewModel(
      * that failed turn red and move back into the Mother Core.
      */
     private suspend fun settleReceivedPhotos(uris: List<Uri>, indices: List<Int>) {
-        delay(ORBIT_MIN_MS)
+        if (holdLanding) {
+            // Expressive: the reveal cards decide when they are finished (with a safety timeout)
+            kotlinx.coroutines.withTimeoutOrNull(90_000) { while (!revealDone) delay(100) }
+        } else {
+            delay(ORBIT_MIN_MS)
+        }
         // Verification started when the download finished; wait only if it is somehow still running
         kotlinx.coroutines.withTimeoutOrNull(10_000) {
             while (indices.any { !verifyResults.containsKey(it) }) delay(50)
@@ -211,7 +291,8 @@ class WorkbenchViewModel(
     private fun finishReceiveSession() {
         val s = _uiState.value
         if (s.landingPhotos.isEmpty() && s.rejectedPhotos.isEmpty() && s.receivingPhotos.isEmpty()) {
-            _uiState.update { it.copy(isReceiving = false, transferProgress = 0f, sessionColor = null) }
+            previewJob?.cancel()
+            _uiState.update { it.copy(isReceiving = false, transferProgress = 0f, sessionColor = null, incoming = emptyList()) }
         }
     }
 
@@ -504,6 +585,7 @@ class WorkbenchViewModel(
         lastDownload = handshake
         verifyResults.clear()
         transferRepository.startDownload(handshake.ip, handshake.port, handshake.token, handshake.fileCount, context, indices)
+        launchPreviews(handshake, indices)
         _uiState.update { it.copy(nfcState = NfcUiState.Transferring) }
     }
 
@@ -512,8 +594,13 @@ class WorkbenchViewModel(
             is TransferState.Complete -> {
                 val uris = state.files.map { Uri.fromFile(it.file) }
                 val indices = state.files.map { it.index }
+                revealDone = false
                 _uiState.update {
                     it.copy(
+                        incoming = it.incoming.map { p ->
+                            val file = state.files.firstOrNull { f -> f.index == p.index }
+                            if (file != null) p.copy(originalUri = Uri.fromFile(file.file)) else p
+                        },
                         nfcState = NfcUiState.Complete,
                         transferProgress = 1f,
                         showRipple = true,
@@ -532,6 +619,7 @@ class WorkbenchViewModel(
                         nfcState = NfcUiState.Error(state.reason),
                         isReceiving = false,
                         sessionColor = null,
+                        incoming = emptyList(),
                         transferError = state.reason
                     )
                 }

@@ -107,6 +107,10 @@ class TransferRepository(
         }
     }
 
+    suspend fun fetchMeta(ip: String, port: Int, token: String) = client.fetchMeta(ip, port, token)
+    suspend fun fetchBand(ip: String, port: Int, token: String, index: Int, n: Int) =
+        client.fetchBand(ip, port, token, index, n)
+
     /** Emits on the sending phone once every served file has been sent in full. */
     val sendCompleteFlow get() = server.allDelivered
 
