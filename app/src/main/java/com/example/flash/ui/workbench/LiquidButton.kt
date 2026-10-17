@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -50,6 +51,8 @@ fun LiquidButton(
     val interactiveHighlight = remember(animationScope) {
         InteractiveHighlight(animationScope = animationScope)
     }
+    // Adaptive luminance: the glass and its text follow the brightness of what is behind the button
+    val adaptive = rememberAdaptiveLuminance()
     Row(
         modifier
             .drawBackdrop(
@@ -57,9 +60,11 @@ fun LiquidButton(
                 shape = shape,
                 effects = {
                     vibrancy()
+                    adaptiveColorControls(adaptive.luminance)
                     blur(2f.dp.toPx())
                     lens(12f.dp.toPx(), 24f.dp.toPx())
                 },
+                onDrawBackdrop = { drawBackdrop -> drawBackdrop(); adaptive.record(this, drawBackdrop) },
                 layerBlock = if (isInteractive) {
                     {
                         val width = size.width
@@ -109,6 +114,8 @@ fun LiquidButton(
             .padding(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
-        content = content
+        content = {
+            CompositionLocalProvider(LocalGlassContentColor provides adaptive.contentColor) { content() }
+        }
     )
 }

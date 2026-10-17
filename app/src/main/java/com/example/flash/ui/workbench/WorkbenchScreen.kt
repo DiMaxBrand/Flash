@@ -546,7 +546,7 @@ fun WorkbenchScreen(
                         ) {
                             Text(
                                 text  = stringResource(R.string.exit_button),
-                                color = Color.White,
+                                color = LocalGlassContentColor.current,
                                 style = MaterialTheme.typography.titleMedium
                             )
                         }
@@ -571,7 +571,7 @@ fun WorkbenchScreen(
                             Icon(
                                 imageVector        = Icons.Default.Settings,
                                 contentDescription = stringResource(R.string.cd_settings),
-                                tint               = Color.White
+                                tint               = LocalGlassContentColor.current
                             )
                         }
                     }
@@ -613,7 +613,7 @@ fun WorkbenchScreen(
                     Icon(
                         Icons.Default.Add,
                         contentDescription = stringResource(R.string.cd_add_photos),
-                        tint = Color.White
+                        tint = LocalGlassContentColor.current
                     )
                 }
                 AddMenu(expanded = showAddMenu, onDismiss = { showAddMenu = false }, picker = photoPicker)
@@ -892,7 +892,7 @@ private fun <T> LiquidSegmentedButtonRow(
                 Text(
                     text = label(item),
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (isSelected) Color.White else Color.White.copy(alpha = 0.6f)
+                    color = LocalGlassContentColor.current.let { if (isSelected) it else it.copy(alpha = 0.65f) }
                 )
             }
         }
@@ -915,6 +915,10 @@ private fun SettingsPanel(
     val uiStyle by themeRepository.uiStyle.collectAsStateWithLifecycle(UiStyle.LIQUID)
     val saveReceived by themeRepository.saveReceived.collectAsStateWithLifecycle(true)
 
+    // Adaptive luminance: the panel measures what is behind it and picks dark or light text
+    val adaptive = rememberAdaptiveLuminance()
+    val ink = adaptive.contentColor
+
     Box(
         modifier = modifier
             .drawBackdrop(
@@ -922,9 +926,11 @@ private fun SettingsPanel(
                 shape    = { RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp) },
                 effects  = {
                     vibrancy()
+                    adaptiveColorControls(adaptive.luminance)
                     blur(18f.dp.toPx())
                     lens(12f.dp.toPx(), 24f.dp.toPx())
                 },
+                onDrawBackdrop = { drawBackdrop -> drawBackdrop(); adaptive.record(this, drawBackdrop) },
                 onDrawSurface = {
                     drawRect(OceanAqua.copy(alpha = 0.07f))
                 }
@@ -942,7 +948,7 @@ private fun SettingsPanel(
             Icon(
                 imageVector        = Icons.Default.Close,
                 contentDescription = "Close settings",
-                tint               = Color.White
+                tint               = LocalGlassContentColor.current
             )
         }
 
@@ -968,11 +974,11 @@ private fun SettingsPanel(
                 Text(
                     text  = stringResource(R.string.settings_title),
                     style = MaterialTheme.typography.titleLarge,
-                    color = Color.White
+                    color = ink
                 )
             }
 
-            HorizontalDivider(color = Color.White.copy(alpha = 0.15f))
+            HorizontalDivider(color = ink.copy(alpha = 0.15f))
 
             Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -981,7 +987,7 @@ private fun SettingsPanel(
                 Text(
                     text  = stringResource(R.string.settings_theme),
                     style = MaterialTheme.typography.bodyLarge,
-                    color = Color.White
+                    color = ink
                 )
                 LiquidSegmentedButtonRow(
                     items = ThemeMode.entries,
@@ -998,7 +1004,7 @@ private fun SettingsPanel(
                 )
             }
 
-            HorizontalDivider(color = Color.White.copy(alpha = 0.15f))
+            HorizontalDivider(color = ink.copy(alpha = 0.15f))
 
             Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -1007,7 +1013,7 @@ private fun SettingsPanel(
                 Text(
                     text  = stringResource(R.string.settings_handshake),
                     style = MaterialTheme.typography.bodyLarge,
-                    color = Color.White
+                    color = ink
                 )
                 LiquidSegmentedButtonRow(
                     items = HandshakeMode.entries,
@@ -1024,7 +1030,7 @@ private fun SettingsPanel(
                 )
             }
 
-            HorizontalDivider(color = Color.White.copy(alpha = 0.15f))
+            HorizontalDivider(color = ink.copy(alpha = 0.15f))
 
             Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -1033,7 +1039,7 @@ private fun SettingsPanel(
                 Text(
                     text  = stringResource(R.string.settings_ui_style),
                     style = MaterialTheme.typography.bodyLarge,
-                    color = Color.White
+                    color = ink
                 )
                 LiquidSegmentedButtonRow(
                     items = UiStyle.entries,
@@ -1049,7 +1055,7 @@ private fun SettingsPanel(
                 )
             }
 
-            HorizontalDivider(color = Color.White.copy(alpha = 0.15f))
+            HorizontalDivider(color = ink.copy(alpha = 0.15f))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1059,7 +1065,7 @@ private fun SettingsPanel(
                 Text(
                     text  = "Save received files to the phone",
                     style = MaterialTheme.typography.bodyLarge,
-                    color = Color.White,
+                    color = ink,
                     modifier = Modifier.weight(1f)
                 )
                 androidx.compose.material3.Switch(
@@ -1068,12 +1074,12 @@ private fun SettingsPanel(
                 )
             }
 
-            HorizontalDivider(color = Color.White.copy(alpha = 0.15f))
+            HorizontalDivider(color = ink.copy(alpha = 0.15f))
 
             Text(
                 text  = "Simulation…",
                 style = MaterialTheme.typography.bodyLarge,
-                color = Color.White,
+                color = ink,
                 modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenSimulation)
             )
 
@@ -1086,7 +1092,7 @@ private fun SettingsPanel(
             Text(
                 text  = versionText,
                 style = MaterialTheme.typography.labelSmall,
-                color = Color.White.copy(alpha = 0.6f)
+                color = ink.copy(alpha = 0.6f)
             )
 
             Spacer(Modifier.height(8.dp))
@@ -1464,7 +1470,7 @@ private fun CorruptionAlert(
                         ) {
                             Text(
                                 text = stringResource(R.string.corruption_button_skip),
-                                color = Color.White,
+                                color = LocalGlassContentColor.current,
                                 style = MaterialTheme.typography.labelMedium,
                                 textAlign = TextAlign.Center
                             )
@@ -1479,7 +1485,7 @@ private fun CorruptionAlert(
                         ) {
                             Text(
                                 text = stringResource(R.string.corruption_button_retry),
-                                color = Color.White,
+                                color = LocalGlassContentColor.current,
                                 style = MaterialTheme.typography.labelMedium,
                                 textAlign = TextAlign.Center
                             )
@@ -1591,7 +1597,7 @@ private fun HotspotPromptModal(
                         ) {
                             Text(
                                 text = stringResource(R.string.hotspot_button_cancel),
-                                color = Color.White,
+                                color = LocalGlassContentColor.current,
                                 style = MaterialTheme.typography.labelMedium,
                                 textAlign = TextAlign.Center
                             )
@@ -1606,7 +1612,7 @@ private fun HotspotPromptModal(
                         ) {
                             Text(
                                 text = stringResource(R.string.hotspot_button_enable),
-                                color = Color.White,
+                                color = LocalGlassContentColor.current,
                                 style = MaterialTheme.typography.labelMedium,
                                 textAlign = TextAlign.Center
                             )
