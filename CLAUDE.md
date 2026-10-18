@@ -47,16 +47,31 @@ Verify build succeeds: `./gradlew clean assembleDebug`
 - Other branches are legacy/session leftovers (`claude-code`, `claude/*`): never base new work on them. The cloud session harness may hand you a `claude/...` branch; push your work to it if told, but also land it on `develop`.
 
 ### Delivery (standing authorization from the user)
-The user develops without a computer and installs APKs from GitHub releases. They have **explicitly and permanently authorized pushing directly to `develop` and `main`** (including force-resetting `develop`/`main` to match each other) whenever work is built and ready, so releases happen without asking each time. Always compile first (`./gradlew assembleDebug`); in the sandbox install the Android SDK (platform 36, build-tools 34) if missing, and use a Maven Central mirror via a `~/.gradle/init.d` script if repo.maven.apache.org rate-limits (429/404). If an auto-mode permission check still blocks a push, stop and tell the user rather than working around it. Put `[skip ci]` in the commit message of docs-only commits so they do not publish a duplicate release.
+The user develops without a computer and installs APKs from GitHub releases. They have **explicitly and permanently authorized pushing directly to `develop` and `main`** whenever work is built and ready. Releases are no longer automatic on every push: see "When to release" below. Always compile first (`./gradlew assembleDebug`); in the sandbox install the Android SDK (platform 36, build-tools 34) if missing, and use a Maven Central mirror via a `~/.gradle/init.d` script if repo.maven.apache.org rate-limits (429/404). If an auto-mode permission check still blocks a push, stop and tell the user rather than working around it. Put `[skip ci]` in the commit message of docs-only commits so they do not publish a duplicate release.
 **Signing (since 0.12.3):** releases are signed with the user's own private key, which lives ONLY in GitHub Actions secrets: `KEYSTORE_BASE64` (the .jks, base64), `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`. The workflow's first step checks them: **if any is missing it builds and releases NOTHING** (a green run with a notice), so no unsigned or debug-signed build can ever be published. When present, the keystore is decoded to a temp file and handed to Gradle through `KEYSTORE_FILE` / `KEYSTORE_PASSWORD` / `KEY_ALIAS` / `KEY_PASSWORD` (`signingConfigs.flash` in `app/build.gradle.kts`). Local and sandbox builds have no key and use Android's auto-generated debug key; the old committed `debug.keystore` is gone. Never commit a keystore or print its passwords.
 
 ### Workflow
 ```
-1. Change code on develop, bump versionCode/versionName (see Version Management)
+1. Change code on develop, bump the version (see Version Management)
 2. ./gradlew assembleDebug  — must pass
-3. git push origin develop   (do NOT push main: it only moves when the user confirms a build works)
-4. CI builds and publishes the release; give the user the release link
+3. git push origin develop
+4. If the push changed what the APK does (see "When to release"): run the release workflow
+   (below) with a title and description, then check the run until it finishes
 ```
+
+### When to release (standing rule from the user, Oct 18)
+- The user tests ONLY through GitHub releases, so a **user-facing** change that deserves at least a beta gets a release automatically — Claude triggers it, the user is not asked to press anything.
+- **User-facing** = anything that changes the APK: code, resources, strings, manifests, dependencies, build settings that change the output. Pushes that only touch docs (CLAUDE.md, notes), comments, or CI files that don't affect the APK do NOT release. When in doubt whether a change reaches the APK, release.
+- Release = bump the beta number (`1.0.0-beta.1` → `1.0.0-beta.2`) and the versionCode in `app/build.gradle.kts` in the same commit as the change, push, then trigger the workflow (below). Do not jump the X.Y.Z while in beta.
+- Several small user-facing changes in one session may be batched into one beta, but never ship a half-finished feature: a release must be self-contained and must not break the app for anyone.
+- **Stable (plain `X.Y.Z`) needs the user's explicit approval first, every time.** Before triggering it, give a short opinion on whether it is ready, then the exact title and description verbatim, and wait for the user to agree. Authorization for one stable release does not carry over to the next.
+
+### How to trigger a release
+- Trigger with the GitHub Actions tool `run_workflow` on repo `dimabpy/flash` (the repo the GitHub tools are configured for; `DiMaxBrand/Flash` is the same project), `workflow_id` = `build.yml`, `ref` = `develop`, and the `title` and `description` inputs. Write both BEFORE triggering: the workflow can't edit a release's title or body afterwards, and a release made without them can only be deleted and redone.
+- **Title format (Russian brand, as in Impulse):** `Флэш <version>: <короткое описание>`, e.g. `Флэш 1.0.0-beta.2: Исправлен приём по NFC`. The prefix is always present, because the update sheet shows this title as its heading. The `<короткое описание>` is in Russian.
+- **Description:** the user-facing highlights in Russian first, then English, short, for ordinary users. Put technical detail in a separate English-only **Developer notes** section. Name unfinished or flagged work plainly as early and off by default; no excited wording for unfinished things. Beta/alpha descriptions are optional, but add one when there is something to call out.
+- Commit message = the release notes body (the workflow appends the commit message without trailers under the description), so write it as a real changelog entry, not a bare subject.
+- After triggering, check the run (`list_workflow_runs`) until it completes, then confirm the release exists and is marked pre-release. If it failed, read the failing step and report it; don't retrigger blindly.
 
 ### Critical Rules
 - **Never create draft PRs** — they bypass CodeRabbit entirely
