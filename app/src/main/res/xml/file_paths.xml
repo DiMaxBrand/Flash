@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
     <cache-path name="transfers" path="transfers/" />
+    <!-- Downloaded update APKs (UpdateDownloader.UPDATES_SUBDIR under the app's Download folder) -->
+    <external-files-path name="updates" path="Download/flash_updates/" />
 </paths>

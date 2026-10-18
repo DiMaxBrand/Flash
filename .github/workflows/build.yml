@@ -24,26 +24,46 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      # main = "confirmed to work" = the stable channel; everything else (develop) = the beta channel.
+      # The in-app updater compares these tags: X.Y.Z (stable) and X.Y.Z-beta.<versionCode> (beta).
+      - name: Release channel
+        id: channel
+        run: |
+          if [ "$GITHUB_REF_NAME" = "main" ]; then
+            echo "name=stable" >> $GITHUB_OUTPUT
+            echo "prerelease=false" >> $GITHUB_OUTPUT
+          else
+            echo "name=beta" >> $GITHUB_OUTPUT
+            echo "prerelease=true" >> $GITHUB_OUTPUT
+          fi
+
       - name: Build debug APK
-        run: ./gradlew assembleDebug --no-daemon
+        run: ./gradlew assembleDebug -PreleaseChannel=${{ steps.channel.outputs.name }} --no-daemon
 
       - name: Get version name
         id: version
         run: |
           VERSION=$(./gradlew -q printVersionName --no-daemon)
-          SHORT_SHA="${GITHUB_SHA::7}"
-          TAG_VERSION=$(echo "$VERSION" | sed 's/[, ]/-/g')
-          echo "tag=v${TAG_VERSION}-${SHORT_SHA}" >> $GITHUB_OUTPUT
-          echo "name=Flash v${VERSION} (${SHORT_SHA})" >> $GITHUB_OUTPUT
+          TAG=$(./gradlew -q printUpdateTag -PreleaseChannel=${{ steps.channel.outputs.name }} --no-daemon)
+          # "0.12.0-updater, Oct 18" -> "updater"
+          SHORT_NAME=$(echo "$VERSION" | sed -E 's/^[0-9.]+-?//; s/, .*$//')
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "name=Flash ${TAG}: ${SHORT_NAME}" >> $GITHUB_OUTPUT
+          # The release notes the update sheet shows: the commit message without the trailer lines
+          {
+            echo "body<<RELEASE_NOTES_EOF"
+            git log -1 --format=%B | grep -v -E '^(Co-Authored-By|Claude-Session):' || true
+            echo
+            echo "Build ${VERSION} from commit ${GITHUB_SHA::7}."
+            echo "RELEASE_NOTES_EOF"
+          } >> $GITHUB_OUTPUT
 
       - name: Create Release & upload APK
         uses: softprops/action-gh-release@v2.0.8
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: ${{ steps.version.outputs.name }}
-          body: |
-            Debug build from commit ${{ github.sha }}
-
-            **Install:** enable *Install unknown apps* on your device, download the APK below and open it.
+          body: ${{ steps.version.outputs.body }}
+          prerelease: ${{ steps.channel.outputs.prerelease }}
           files: app/build/outputs/apk/debug/app-debug.apk
-          make_latest: true
+          make_latest: ${{ steps.channel.outputs.prerelease == 'false' }}

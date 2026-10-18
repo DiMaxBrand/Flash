@@ -1,7 +1,13 @@
 package com.example.flash.navigation
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
+import com.example.flash.ui.update.UpdateController
+import com.example.flash.ui.workbench.WorkbenchViewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import com.example.flash.handshake.CameraHandshakeManager
@@ -25,7 +31,8 @@ fun NavGraph(
     themeRepository: ThemeRepository,
     transferRepository: TransferRepository,
     nfcManager: NfcManager,
-    cameraHandshakeManager: CameraHandshakeManager
+    cameraHandshakeManager: CameraHandshakeManager,
+    updateController: UpdateController
 ) {
     NavHost(navController = navController, startDestination = startDestination) {
 
@@ -49,9 +56,23 @@ fun NavGraph(
             )
         }
 
-        composable(Screen.Settings.route) {
+        composable(Screen.Settings.route) { entry ->
+            // The workbench's ViewModel (owned by the Main entry) runs the Simulation from Settings
+            val mainEntry = remember(entry) { runCatching { navController.getBackStackEntry(Screen.Main.route) }.getOrNull() }
+            val workbenchViewModel: WorkbenchViewModel? = mainEntry?.let {
+                viewModel(
+                    viewModelStoreOwner = it,
+                    factory = object : ViewModelProvider.Factory {
+                        @Suppress("UNCHECKED_CAST")
+                        override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                            WorkbenchViewModel(transferRepository, nfcManager, cameraHandshakeManager) as T
+                    }
+                )
+            }
             SettingsScreen(
                 themeRepository = themeRepository,
+                workbenchViewModel = workbenchViewModel,
+                updates = updateController,
                 onBack = { navController.popBackStack() }
             )
         }

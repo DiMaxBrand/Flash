@@ -126,7 +126,8 @@ fun ExpressiveWorkbench(
     missingPermissions: Boolean,
     onRequestPermissions: () -> Unit,
     cameraGranted: Boolean,
-    picker: com.example.flash.ui.workbench.PhotoPickerState
+    picker: com.example.flash.ui.workbench.PhotoPickerState,
+    onOpenSettings: () -> Unit
 ) {
     val context = LocalContext.current
     val themeMode by themeRepository.themeMode.collectAsStateWithLifecycle(ThemeMode.SYSTEM)
@@ -164,8 +165,6 @@ fun ExpressiveWorkbench(
         state.landingPhotos.forEach { viewModel.onPhotoLanded(it) }
     }
 
-    var showSettings by remember { mutableStateOf(false) }
-    var showSimulation by remember { mutableStateOf(false) }
     val viewfinderActive = cameraGranted && state.cameraHandshakeEnabled &&
         state.selectedPhotos.isEmpty() && !state.isReceiving &&
         state.colorDetectionState != ColorDetectionState.Locked
@@ -209,7 +208,7 @@ fun ExpressiveWorkbench(
                         IconButton(onClick = { (context as? Activity)?.finish() }) {
                             Icon(Icons.Default.Close, contentDescription = stringResource(R.string.exit_button))
                         }
-                        IconButton(onClick = { showSettings = true }) {
+                        IconButton(onClick = onOpenSettings) {
                             Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.cd_settings))
                         }
                     },
@@ -413,14 +412,6 @@ fun ExpressiveWorkbench(
                 }
             )
         }
-        if (showSettings) {
-            ModalBottomSheet(onDismissRequest = { showSettings = false }) {
-                SettingsContent(themeRepository, onOpenSimulation = { showSimulation = true })
-            }
-        }
-        if (showSimulation) {
-            com.example.flash.ui.workbench.SimulationDialog(viewModel, onDismiss = { showSimulation = false; showSettings = false })
-        }
     }
 }
 
@@ -613,140 +604,6 @@ private fun TrayTile(uri: android.net.Uri, progress: Float, rejected: Boolean = 
                     .padding(4.dp)
             )
         }
-    }
-}
-
-/** An expressive connected button group: toggle buttons with rounded end caps that morph when selected. */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-private fun <T> ChoiceRow(
-    title: String,
-    items: List<T>,
-    selected: T,
-    label: @Composable (T) -> String,
-    onSelect: (T) -> Unit
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(title, style = MaterialTheme.typography.titleMedium)
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween)
-        ) {
-            items.forEachIndexed { index, item ->
-                val shapes = when (index) {
-                    0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
-                    items.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
-                    else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
-                }
-                ToggleButton(
-                    checked = item == selected,
-                    onCheckedChange = { onSelect(item) },
-                    shapes = shapes,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text(label(item), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SettingsContent(themeRepository: ThemeRepository, onOpenSimulation: () -> Unit) {
-    val scope = rememberCoroutineScope()
-    val context = LocalContext.current
-    val themeMode by themeRepository.themeMode.collectAsStateWithLifecycle(ThemeMode.SYSTEM)
-    val handshake by themeRepository.handshakeMode.collectAsStateWithLifecycle(HandshakeMode.AUTO)
-    val uiStyle by themeRepository.uiStyle.collectAsStateWithLifecycle(UiStyle.EXPRESSIVE)
-    val language by themeRepository.language.collectAsStateWithLifecycle("")
-    val saveReceived by themeRepository.saveReceived.collectAsStateWithLifecycle(true)
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(horizontal = 24.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp)
-    ) {
-        Text(stringResource(R.string.settings_title), style = MaterialTheme.typography.headlineSmall)
-
-        ChoiceRow(
-            title = stringResource(R.string.settings_theme),
-            items = ThemeMode.entries,
-            selected = themeMode,
-            label = {
-                when (it) {
-                    ThemeMode.LIGHT -> stringResource(R.string.theme_light)
-                    ThemeMode.DARK -> stringResource(R.string.theme_dark)
-                    ThemeMode.SYSTEM -> stringResource(R.string.theme_system)
-                }
-            },
-            onSelect = { scope.launch { themeRepository.setThemeMode(it) } }
-        )
-        ChoiceRow(
-            title = stringResource(R.string.settings_handshake),
-            items = HandshakeMode.entries,
-            selected = handshake,
-            label = {
-                when (it) {
-                    HandshakeMode.AUTO -> stringResource(R.string.handshake_auto)
-                    HandshakeMode.NFC -> stringResource(R.string.handshake_nfc)
-                    HandshakeMode.CAMERA -> stringResource(R.string.handshake_camera)
-                }
-            },
-            onSelect = { scope.launch { themeRepository.setHandshakeMode(it) } }
-        )
-        ChoiceRow(
-            title = stringResource(R.string.settings_ui_style),
-            items = UiStyle.entries,
-            selected = uiStyle,
-            label = {
-                when (it) {
-                    UiStyle.LIQUID -> stringResource(R.string.ui_style_liquid)
-                    UiStyle.EXPRESSIVE -> stringResource(R.string.ui_style_expressive)
-                }
-            },
-            onSelect = { scope.launch { themeRepository.setUiStyle(it) } }
-        )
-        ChoiceRow(
-            title = stringResource(R.string.settings_language),
-            items = listOf("en", "ru"),
-            selected = if (language.isEmpty()) "en" else language,
-            label = { if (it == "en") stringResource(R.string.lang_en) else stringResource(R.string.lang_ru) },
-            onSelect = { lang ->
-                scope.launch {
-                    themeRepository.setLanguage(lang)
-                    AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(lang))
-                }
-            }
-        )
-
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                "Save received files to the phone",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.weight(1f)
-            )
-            Switch(checked = saveReceived, onCheckedChange = { scope.launch { themeRepository.setSaveReceived(it) } })
-        }
-        androidx.compose.material3.FilledTonalButton(onClick = onOpenSimulation) { Text("Simulation…") }
-
-        val versionText = remember {
-            runCatching {
-                val info = context.packageManager.getPackageInfo(context.packageName, 0)
-                "Flash ${info.versionName} (build ${info.longVersionCode})"
-            }.getOrDefault("Flash")
-        }
-        Text(
-            versionText,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(Modifier.height(16.dp))
     }
 }
 

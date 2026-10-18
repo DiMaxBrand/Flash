@@ -16,6 +16,7 @@ import com.example.flash.navigation.NavGraph
 import com.example.flash.navigation.Screen
 import com.example.flash.nfc.NfcManager
 import com.example.flash.ui.theme.FlashTheme
+import com.example.flash.ui.update.UpdateSheetHost
 
 class MainActivity : ComponentActivity() {
 
@@ -45,15 +46,22 @@ class MainActivity : ComponentActivity() {
                     themeRepository = app.themeRepository,
                     transferRepository = app.transferRepository,
                     nfcManager = nfcManager,
-                    cameraHandshakeManager = app.cameraHandshakeManager
+                    cameraHandshakeManager = app.cameraHandshakeManager,
+                    updateController = app.updateController
                 )
+                // The update bottom sheet appears over whichever screen is open
+                UpdateSheetHost(app.updateController, themeMode)
             }
         }
     }
 
     override fun onResume() {
         super.onResume()
-        // We'll manage NFC modes dynamically based on UI state now.
+        // NFC modes are managed dynamically based on UI state (see WorkbenchScreen).
+        // Look for an update when the app opens, and show one that is already pending.
+        val updates = (application as FlashApplication).updateController
+        updates.showSheetIfPending()
+        updates.checkOnLaunchIfEligible()
     }
 
     override fun onPause() {

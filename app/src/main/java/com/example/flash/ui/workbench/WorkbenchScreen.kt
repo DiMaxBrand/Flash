@@ -316,7 +316,6 @@ fun WorkbenchScreen(
     }
 
     var coreCenter   by remember { mutableStateOf(Offset.Zero) }
-    var showSettings by remember { mutableStateOf(false) }
 
     var exitEnabled by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(600L); exitEnabled = true }
@@ -380,14 +379,6 @@ fun WorkbenchScreen(
         }
     }
 
-    // Close settings panel on back press
-    BackHandler(enabled = showSettings) { showSettings = false }
-
-    var showSimulation by remember { mutableStateOf(false) }
-    if (showSimulation) {
-        SimulationDialog(viewModel, onDismiss = { showSimulation = false; showSettings = false })
-    }
-
     val photoPicker      = rememberPhotoPicker(
         onPhotos = { uris -> viewModel.onPhotosSelected(uris, context) },
         onMedia  = { uris -> viewModel.onMediaSelected(uris, context) }
@@ -412,7 +403,8 @@ fun WorkbenchScreen(
             missingPermissions = missingPairingPermissions().isNotEmpty(),
             onRequestPermissions = { requestPairingPermissions() },
             cameraGranted = cameraGranted,
-            picker = photoPicker
+            picker = photoPicker,
+            onOpenSettings = onNavigateToSettings
         )
         return
     }
@@ -496,87 +488,46 @@ fun WorkbenchScreen(
             }
         }
 
-        // ── Bottom area: two buttons or settings panel ───────────────────────
-        SharedTransitionLayout(
-            modifier = Modifier.align(Alignment.BottomCenter)
+        // ── Bottom area: Exit and Settings (Settings is its own screen) ──────
+        Row(
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
         ) {
-            AnimatedContent(
-                targetState = showSettings,
-                transitionSpec = {
-                    fadeIn(tween(500, easing = FastOutSlowInEasing)) togetherWith
-                        fadeOut(tween(350, easing = FastOutSlowInEasing))
-                },
-                label = "settings_transform"
-            ) { isOpen ->
-                if (!isOpen) {
-                    // ── Two liquid buttons with spacer ───────────────────────
-                    Row(
-                        modifier = Modifier.padding(bottom = 24.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        // Exit button
-                        LiquidButton(
-                            onClick      = { viewModel.onExitRequested() },
-                            backdrop     = backdrop,
-                            enabled      = exitEnabled,
-                            surfaceColor = OceanAqua.copy(alpha = 0.25f),
-                            modifier     = Modifier.width(128.dp)
-                        ) {
-                            Text(
-                                text  = stringResource(R.string.exit_button),
-                                color = LocalGlassContentColor.current,
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                        }
+            LiquidButton(
+                onClick      = { viewModel.onExitRequested() },
+                backdrop     = backdrop,
+                enabled      = exitEnabled,
+                surfaceColor = OceanAqua.copy(alpha = 0.25f),
+                modifier     = Modifier.width(128.dp)
+            ) {
+                Text(
+                    text  = stringResource(R.string.exit_button),
+                    color = LocalGlassContentColor.current,
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
 
-                        Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(12.dp))
 
-                        // Settings button — sharedBounds connects it to the panel
-                        LiquidButton(
-                            onClick      = { showSettings = true },
-                            backdrop     = backdrop,
-                            enabled      = true,
-                            surfaceColor = OceanAqua.copy(alpha = 0.25f),
-                            modifier     = Modifier
-                                .width(128.dp)
-                                .sharedBounds(
-                                    rememberSharedContentState(key = "settings-panel"),
-                                    animatedVisibilityScope = this@AnimatedContent,
-                                    enter = fadeIn(tween(500)),
-                                    exit  = fadeOut(tween(350))
-                                )
-                        ) {
-                            Icon(
-                                imageVector        = Icons.Default.Settings,
-                                contentDescription = stringResource(R.string.cd_settings),
-                                tint               = LocalGlassContentColor.current
-                            )
-                        }
-                    }
-                } else {
-                    // ── Settings panel expands from the button ───────────────
-                    SettingsPanel(
-                        themeRepository = app.themeRepository,
-                        backdrop        = backdrop,
-                        onClose         = { showSettings = false },
-                        onOpenSimulation = { showSimulation = true },
-                        modifier        = Modifier
-                            .fillMaxWidth()
-                            .sharedBounds(
-                                rememberSharedContentState(key = "settings-panel"),
-                                animatedVisibilityScope = this@AnimatedContent,
-                                enter = fadeIn(tween(500)),
-                                exit  = fadeOut(tween(350))
-                            )
-                    )
-                }
+            LiquidButton(
+                onClick      = onNavigateToSettings,
+                backdrop     = backdrop,
+                enabled      = true,
+                surfaceColor = OceanAqua.copy(alpha = 0.25f),
+                modifier     = Modifier.width(128.dp)
+            ) {
+                Icon(
+                    imageVector        = Icons.Default.Settings,
+                    contentDescription = stringResource(R.string.cd_settings),
+                    tint               = LocalGlassContentColor.current
+                )
             }
         }
 
-        // ── "+" liquid glass button — hidden when settings panel is open ─────
+        // ── "+" liquid glass button ──────────────────────────────────────────
         AnimatedVisibility(
-            visible = !showSettings,
+            visible = true,
             enter   = fadeIn(tween(300)) + scaleIn(tween(300), initialScale = 0.85f),
             exit    = fadeOut(tween(200)) + scaleOut(tween(200), targetScale = 0.85f),
             modifier = Modifier
@@ -734,8 +685,7 @@ fun WorkbenchScreen(
         // ── Status, errors and the scan popup: one column ABOVE everything else ──
         // Drawn after MotherCore and the "+" button, and kept in the free band between the
         // photo grid and the bottom buttons, so nothing (blob, "+", buttons) covers it.
-        // Hidden while the settings panel is open: the panel always has the top layer
-        if (!showSettings) Column(
+        Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 160.dp, start = 16.dp, end = 16.dp),
@@ -846,262 +796,6 @@ fun WorkbenchScreen(
                 )
             }
 
-        }
-    }
-}
-
-// ── Liquid glass segmented button row ──────────────────────────────────────
-@Composable
-private fun <T> LiquidSegmentedButtonRow(
-    items: List<T>,
-    selectedItem: T,
-    onItemSelected: (T) -> Unit,
-    backdrop: Backdrop,
-    label: @Composable (T) -> String,
-    modifier: Modifier = Modifier
-) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(0.dp)
-    ) {
-        items.forEachIndexed { index, item ->
-            val isFirst = index == 0
-            val isLast = index == items.size - 1
-            val isSelected = selectedItem == item
-
-            val buttonShape: () -> Shape = when {
-                isFirst && isLast -> { { com.kyant.shapes.Capsule() } }
-                isFirst -> { {
-                    RoundedCornerShape(
-                        topStart = 50.dp, bottomStart = 50.dp,
-                        topEnd = 15.dp,   bottomEnd = 15.dp
-                    )
-                } }
-                isLast -> { {
-                    RoundedCornerShape(
-                        topStart = 15.dp, bottomStart = 15.dp,
-                        topEnd = 50.dp,   bottomEnd = 50.dp
-                    )
-                } }
-                else -> { { RoundedCornerShape(15.dp) } }
-            }
-
-            LiquidButton(
-                onClick = { onItemSelected(item) },
-                backdrop = backdrop,
-                surfaceColor = if (isSelected) OceanAqua.copy(alpha = 0.45f) else OceanAqua.copy(alpha = 0.15f),
-                buttonHeight = 40.dp,
-                shape = buttonShape,
-                modifier = Modifier.weight(1f),
-                isInteractive = true
-            ) {
-                Text(
-                    text = label(item),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = LocalGlassContentColor.current.let { if (isSelected) it else it.copy(alpha = 0.65f) }
-                )
-            }
-        }
-    }
-}
-
-// ── Settings panel: liquid glass bottom container ───────────────────────────
-@Composable
-private fun SettingsPanel(
-    themeRepository: ThemeRepository,
-    backdrop: Backdrop,
-    onClose: () -> Unit,
-    onOpenSimulation: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val scope     = rememberCoroutineScope()
-    val context   = LocalContext.current
-    val themeMode by themeRepository.themeMode.collectAsStateWithLifecycle(ThemeMode.SYSTEM)
-    val handshakeMode by themeRepository.handshakeMode.collectAsStateWithLifecycle(HandshakeMode.AUTO)
-    val uiStyle by themeRepository.uiStyle.collectAsStateWithLifecycle(UiStyle.LIQUID)
-    val saveReceived by themeRepository.saveReceived.collectAsStateWithLifecycle(true)
-
-    // Adaptive luminance: the panel measures what is behind it and picks dark or light text
-    val adaptive = rememberAdaptiveLuminance()
-    val ink = adaptive.contentColor
-
-    Box(
-        modifier = modifier
-            .drawBackdrop(
-                backdrop = backdrop,
-                shape    = { RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp) },
-                effects  = {
-                    vibrancy()
-                    adaptiveColorControls(adaptive.luminance)
-                    blur(18f.dp.toPx())
-                    lens(12f.dp.toPx(), 24f.dp.toPx())
-                },
-                onDrawBackdrop = { drawBackdrop -> drawBackdrop(); adaptive.record(this, drawBackdrop) },
-                onDrawSurface = {
-                    drawRect(OceanAqua.copy(alpha = 0.07f))
-                }
-            )
-            .padding(horizontal = 24.dp, vertical = 16.dp)
-    ) {
-        // ── Liquid glass close button ────────────────────────────────────────
-        LiquidButton(
-            onClick      = onClose,
-            backdrop     = backdrop,
-            surfaceColor = OceanAqua.copy(alpha = 0.20f),
-            buttonHeight = 40.dp,
-            modifier     = Modifier.align(Alignment.TopEnd)
-        ) {
-            Icon(
-                imageVector        = Icons.Default.Close,
-                contentDescription = "Close settings",
-                tint               = LocalGlassContentColor.current
-            )
-        }
-
-        Column(
-            verticalArrangement = Arrangement.spacedBy(20.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            // ── Liquid glass "Settings" title pill ───────────────────────────
-            Box(
-                modifier = Modifier
-                    .drawBackdrop(
-                        backdrop = backdrop,
-                        shape    = { RoundedCornerShape(50) },
-                        effects  = {
-                            vibrancy()
-                            blur(6f.dp.toPx())
-                            lens(8f.dp.toPx(), 16f.dp.toPx())
-                        },
-                        onDrawSurface = { drawRect(OceanAqua.copy(alpha = 0.12f)) }
-                    )
-                    .padding(horizontal = 16.dp, vertical = 6.dp)
-            ) {
-                Text(
-                    text  = stringResource(R.string.settings_title),
-                    style = MaterialTheme.typography.titleLarge,
-                    color = ink
-                )
-            }
-
-            HorizontalDivider(color = ink.copy(alpha = 0.15f))
-
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    text  = stringResource(R.string.settings_theme),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = ink
-                )
-                LiquidSegmentedButtonRow(
-                    items = ThemeMode.entries,
-                    selectedItem = themeMode,
-                    onItemSelected = { scope.launch { themeRepository.setThemeMode(it) } },
-                    backdrop = backdrop,
-                    label = { mode ->
-                        when (mode) {
-                            ThemeMode.LIGHT  -> stringResource(R.string.theme_light)
-                            ThemeMode.DARK   -> stringResource(R.string.theme_dark)
-                            ThemeMode.SYSTEM -> stringResource(R.string.theme_system)
-                        }
-                    }
-                )
-            }
-
-            HorizontalDivider(color = ink.copy(alpha = 0.15f))
-
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    text  = stringResource(R.string.settings_handshake),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = ink
-                )
-                LiquidSegmentedButtonRow(
-                    items = HandshakeMode.entries,
-                    selectedItem = handshakeMode,
-                    onItemSelected = { scope.launch { themeRepository.setHandshakeMode(it) } },
-                    backdrop = backdrop,
-                    label = { mode ->
-                        when (mode) {
-                            HandshakeMode.AUTO   -> stringResource(R.string.handshake_auto)
-                            HandshakeMode.NFC    -> stringResource(R.string.handshake_nfc)
-                            HandshakeMode.CAMERA -> stringResource(R.string.handshake_camera)
-                        }
-                    }
-                )
-            }
-
-            HorizontalDivider(color = ink.copy(alpha = 0.15f))
-
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    text  = stringResource(R.string.settings_ui_style),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = ink
-                )
-                LiquidSegmentedButtonRow(
-                    items = UiStyle.entries,
-                    selectedItem = uiStyle,
-                    onItemSelected = { scope.launch { themeRepository.setUiStyle(it) } },
-                    backdrop = backdrop,
-                    label = { style ->
-                        when (style) {
-                            UiStyle.LIQUID     -> stringResource(R.string.ui_style_liquid)
-                            UiStyle.EXPRESSIVE -> stringResource(R.string.ui_style_expressive)
-                        }
-                    }
-                )
-            }
-
-            HorizontalDivider(color = ink.copy(alpha = 0.15f))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text  = "Save received files to the phone",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = ink,
-                    modifier = Modifier.weight(1f)
-                )
-                androidx.compose.material3.Switch(
-                    checked = saveReceived,
-                    onCheckedChange = { scope.launch { themeRepository.setSaveReceived(it) } }
-                )
-            }
-
-            HorizontalDivider(color = ink.copy(alpha = 0.15f))
-
-            Text(
-                text  = "Simulation…",
-                style = MaterialTheme.typography.bodyLarge,
-                color = ink,
-                modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenSimulation)
-            )
-
-            val versionText = remember {
-                runCatching {
-                    val info = context.packageManager.getPackageInfo(context.packageName, 0)
-                    "Flash ${info.versionName} (build ${info.longVersionCode})"
-                }.getOrDefault("Flash")
-            }
-            Text(
-                text  = versionText,
-                style = MaterialTheme.typography.labelSmall,
-                color = ink.copy(alpha = 0.6f)
-            )
-
-            Spacer(Modifier.height(8.dp))
         }
     }
 }

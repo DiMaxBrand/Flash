@@ -4,6 +4,18 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
+// Bump both on every change that goes into the APK (see CLAUDE.md "Version Management Workflow").
+val appVersionCode = 51
+val appVersionName = "0.12.0-updater, Oct 18"
+
+// The in-app updater compares semantic versions that match the GitHub release tags:
+//   stable (built from main):    X.Y.Z
+//   beta   (built from develop): X.Y.Z-beta.<versionCode>
+// CI passes -PreleaseChannel=stable for main; every other build (local, develop) is a beta.
+val appCoreVersion = Regex("""\d+\.\d+\.\d+""").find(appVersionName)!!.value
+val appReleaseChannel = (findProperty("releaseChannel") as String?) ?: "beta"
+val appUpdateVersion = if (appReleaseChannel == "stable") appCoreVersion else "$appCoreVersion-beta.$appVersionCode"
+
 android {
     namespace = "com.example.flash"
     compileSdk = 37
@@ -12,8 +24,9 @@ android {
         applicationId = "com.example.flash"
         minSdk = 26
         targetSdk = 35
-        versionCode = 50
-        versionName = "0.11.0-nfc-reader, Oct 17"
+        versionCode = appVersionCode
+        versionName = appVersionName
+        buildConfigField("String", "UPDATE_VERSION", "\"$appUpdateVersion\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -41,6 +54,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     compileOptions {
@@ -52,6 +66,11 @@ android {
 kotlin {
     compilerOptions {
         jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21
+        // Same opt-ins as Impulse (the copied update UI uses the Expressive APIs in many places)
+        freeCompilerArgs.addAll(
+            "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api",
+            "-opt-in=androidx.compose.material3.ExperimentalMaterial3ExpressiveApi"
+        )
     }
 }
 
@@ -119,5 +138,10 @@ dependencies {
 }
 
 tasks.register("printVersionName") {
-    doLast { println(android.defaultConfig.versionName) }
+    doLast { println(appVersionName) }
+}
+
+// The GitHub release tag for this build (X.Y.Z or X.Y.Z-beta.N), used by CI
+tasks.register("printUpdateTag") {
+    doLast { println(appUpdateVersion) }
 }

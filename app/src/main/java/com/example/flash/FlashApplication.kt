@@ -30,6 +30,11 @@ class FlashApplication : Application() {
         )
     }
 
+    // The in-app updater (check, download, install); shared by Settings and the update sheet.
+    val updateController: com.example.flash.ui.update.UpdateController by lazy {
+        com.example.flash.ui.update.UpdateController(this)
+    }
+
     // Always created; whether it is used is decided by the HandshakeMode setting.
     val cameraHandshakeManager: CameraHandshakeManager by lazy {
         CameraHandshakeManager(this)
