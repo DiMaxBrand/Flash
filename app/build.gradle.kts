@@ -5,8 +5,8 @@ plugins {
 }
 
 // Bump both on every change that goes into the APK (see CLAUDE.md "Version Management Workflow").
-val appVersionCode = 55
-val appVersionName = "0.12.4-release-lint, Oct 18"
+val appVersionCode = 56
+val appVersionName = "1.0.0, Oct 18"
 
 // The in-app updater compares semantic versions that match the GitHub release tags:
 //   stable (built from main):    X.Y.Z
