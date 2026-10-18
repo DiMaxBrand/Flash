@@ -95,7 +95,7 @@ class NfcManager(private val context: Context) {
 
         val mimeRecord = NdefRecord.createMime("application/vnd.flash.handshake", json.toByteArray(Charsets.UTF_8))
         // Android Application Record: opens Flash if the receiving phone's app is not running
-        val aarRecord = NdefRecord.createApplicationRecord("com.example.flash")
+        val aarRecord = NdefRecord.createApplicationRecord(context.packageName)
 
         val msg = NdefMessage(arrayOf(mimeRecord, aarRecord))
         outboundMessage = msg

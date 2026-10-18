@@ -12,6 +12,7 @@
 - **Networking**: Ktor CIO (3.1.2)
 - **Build System**: AGP 9.2.1, Gradle 9.4.1
 - **Min SDK**: 26, Target SDK: 35, Compile SDK: 37
+- **App identity**: `applicationId = "com.dimax.flash"` (since 0.12.3; a different app from the old `com.example.flash` builds, which must be uninstalled by hand). The code's package/namespace is still `com.example.flash` — do not rename source packages. Use `context.packageName`, never a hard-coded id (the NFC Android Application Record does).
 
 ## Build Environment
 
