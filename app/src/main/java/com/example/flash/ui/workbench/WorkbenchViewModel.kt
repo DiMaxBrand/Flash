@@ -197,7 +197,16 @@ class WorkbenchViewModel(
             val app = FlashApplication.instance
             val bound = LocalNetwork.bindProcessToWifi(app)
             try {
-                val meta = transferRepository.fetchMeta(handshake.ip, handshake.port, handshake.token)
+                // A sender busy preparing many photos can answer late or drop the first request: try a
+                // few times before giving up on previews (falling back to the old flow loses the whole
+                // new animation, which is what happened with 27 photos)
+                var meta = transferRepository.fetchMeta(handshake.ip, handshake.port, handshake.token)
+                var attempt = 1
+                while (meta == null && attempt < 3) {
+                    delay(700)
+                    meta = transferRepository.fetchMeta(handshake.ip, handshake.port, handshake.token)
+                    attempt++
+                }
                 if (meta == null) {
                     // An older sender without previews: the old orbit flow takes over
                     _uiState.update { it.copy(legacyReceive = true) }

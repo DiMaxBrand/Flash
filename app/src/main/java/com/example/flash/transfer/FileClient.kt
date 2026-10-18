@@ -35,6 +35,10 @@ data class DownloadedFile(val index: Int, val file: File, val expectedChecksum: 
 
 class FileClient {
 
+    private companion object {
+        const val MAX_PARALLEL_DOWNLOADS = 4
+    }
+
     private val client = HttpClient(CIO) {
         install(HttpTimeout) {
             requestTimeoutMillis = 30_000
@@ -66,16 +70,24 @@ class FileClient {
         val lock = Any()
         var firstError: Throwable? = null
 
+        // A few files at a time, in order: with 27 photos all downloading at once every one of them
+        // finishes at the very end, so nothing could be shown until the whole batch was done.
+        val slots = kotlinx.coroutines.sync.Semaphore(MAX_PARALLEL_DOWNLOADS)
         supervisorScope {
             indices.forEach { index ->
                 launch {
                     runCatching {
-                        download(ip, port, token, index, destDir) { progress ->
-                            onFileProgress(index, progress)
-                            synchronized(lock) {
-                                progresses[index] = progress
-                                onProgress(indices.sumOf { (progresses[it] ?: 0f).toDouble() }.toFloat() / indices.size)
+                        slots.acquire()
+                        try {
+                            download(ip, port, token, index, destDir) { progress ->
+                                onFileProgress(index, progress)
+                                synchronized(lock) {
+                                    progresses[index] = progress
+                                    onProgress(indices.sumOf { (progresses[it] ?: 0f).toDouble() }.toFloat() / indices.size)
+                                }
                             }
+                        } finally {
+                            slots.release()
                         }
                     }.onSuccess { downloaded ->
                         synchronized(lock) { results[index] = downloaded }
@@ -113,7 +125,10 @@ class FileClient {
 
     /** Asks the sender for photo sizes and tiny thumbnails; null if it is an older sender without previews. */
     suspend fun fetchMeta(ip: String, port: Int, token: String): List<FileMeta>? = runCatching {
-        val response = client.get("http://$ip:$port/meta/$token")
+        // The sender builds a preview per file: many photos can take a while, so wait generously
+        val response = client.get("http://$ip:$port/meta/$token") {
+            timeout { requestTimeoutMillis = 120_000 }
+        }
         if (!response.status.isSuccess()) return null
         val files = org.json.JSONObject(response.bodyAsText()).getJSONArray("files")
         (0 until files.length()).map { i ->

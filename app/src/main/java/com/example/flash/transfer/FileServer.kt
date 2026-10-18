@@ -15,6 +15,8 @@ import io.ktor.server.response.respondOutputStream
 import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import java.io.OutputStream
 import java.net.ServerSocket
@@ -54,8 +56,16 @@ class FileServer(private val scope: CoroutineScope) {
         digest.digest().joinToString("") { "%02x".format(it) }
     }
 
-    private fun prehash(token: String, index: Int, uri: Uri) {
-        scope.launch(Dispatchers.IO) { runCatching { checksumOf("$token/$index", uri) } }
+    /**
+     * Gets ready before the receiver asks: the previews first (in parallel), then the checksums one
+     * file at a time so hashing never competes with the previews or the transfers.
+     */
+    private fun warmUp(token: String, from: Int) {
+        val todo = entries.toList().drop(from)
+        scope.launch(Dispatchers.Default) {
+            todo.indices.map { i -> async { runCatching { buildMeta(from + i) } } }.awaitAll()
+            todo.forEachIndexed { i, entry -> runCatching { checksumOf("$token/${from + i}", entry.second) } }
+        }
     }
 
     // ── Display previews: a tiny blurred thumbnail plus the photo in horizontal bands ──────────
@@ -253,7 +263,7 @@ class FileServer(private val scope: CoroutineScope) {
         resetDelivery()
         appContext = context.applicationContext
         uris.forEach { entries.add(token to it) }
-        uris.forEachIndexed { i, u -> prehash(token, i, u) }
+        warmUp(token, 0)
         refreshTotalBytes()
         port = findFreePort()
         server = embeddedServer(CIO, port = port) {
@@ -266,9 +276,14 @@ class FileServer(private val scope: CoroutineScope) {
                         return@get
                     }
                     val json = withContext(Dispatchers.Default) {
+                        // All previews at once (they are usually already cached by warmUp): 27 photos
+                        // built one after another used to outlast the receiver's request timeout
+                        val metas = kotlinx.coroutines.coroutineScope {
+                            entries.indices.map { i -> async { buildMeta(i) } }.awaitAll()
+                        }
                         val files = JSONArray()
-                        for (i in entries.indices) {
-                            val meta = buildMeta(i) ?: continue
+                        for ((i, meta) in metas.withIndex()) {
+                            if (meta == null) continue
                             files.put(JSONObject().apply {
                                 put("i", i); put("w", meta.width); put("h", meta.height)
                                 put("pw", meta.pw); put("ph", meta.ph)
@@ -346,7 +361,7 @@ class FileServer(private val scope: CoroutineScope) {
 
     fun addUri(token: String, uri: Uri) {
         entries.add(token to uri)
-        prehash(token, entries.size - 1, uri)
+        warmUp(token, entries.size - 1)
         refreshTotalBytes()
         allDeliveredFired = false   // a new file is waiting; report again when everything is out
     }
