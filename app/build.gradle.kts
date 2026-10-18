@@ -17,11 +17,10 @@ val appReleaseChannel = (findProperty("releaseChannel") as String?) ?: "beta"
 val appUpdateVersion = if (appReleaseChannel == "stable") appCoreVersion else "$appCoreVersion-beta.$appVersionCode"
 
 android {
-    namespace = "com.example.flash"
+    namespace = "com.dimax.flash"
     compileSdk = 37
 
     defaultConfig {
-        // The code's package (namespace) stays com.example.flash; only the app's identity changes
         applicationId = "com.dimax.flash"
         minSdk = 26
         targetSdk = 35

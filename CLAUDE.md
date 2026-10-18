@@ -12,7 +12,7 @@
 - **Networking**: Ktor CIO (3.1.2)
 - **Build System**: AGP 9.2.1, Gradle 9.4.1
 - **Min SDK**: 26, Target SDK: 35, Compile SDK: 37
-- **App identity**: `applicationId = "com.dimax.flash"` (since 0.12.3; a different app from the old `com.example.flash` builds, which must be uninstalled by hand). The code's package/namespace is still `com.example.flash` — do not rename source packages. Use `context.packageName`, never a hard-coded id (the NFC Android Application Record does).
+- **App identity**: package, namespace and `applicationId` are all `com.dimax.flash` (since 0.12.3). It is a different app from the old placeholder-named builds, which had to be uninstalled by hand; nothing of the old name is left in the repository. Use `context.packageName`, never a hard-coded id (the NFC Android Application Record does).
 
 ## Build Environment
 
@@ -107,7 +107,7 @@ infiniteRepeatable(
 
 ### Mother Core (Liquid Glass Blob)
 
-**File**: `app/src/main/java/com/example/flash/ui/core/MotherCore.kt`
+**File**: `app/src/main/java/com/dimax/flash/ui/core/MotherCore.kt`
 
 #### Constants
 ```kotlin
@@ -151,7 +151,7 @@ val specularShiftY = (cos(time * 0.00047 * PI) * baseRPx * 0.09f).toFloat()
 
 ### Photo Orbiting
 
-**File**: `app/src/main/java/com/example/flash/ui/workbench/PhotoOrbit.kt`
+**File**: `app/src/main/java/com/dimax/flash/ui/workbench/PhotoOrbit.kt`
 
 #### Golden Angle Spacing
 ```kotlin
@@ -211,7 +211,7 @@ val radialDrift by infiniteTransition.animateFloat(
 
 ### Onboarding Animation
 
-**File**: `app/src/main/java/com/example/flash/ui/onboarding/OnboardingScreen.kt`
+**File**: `app/src/main/java/com/dimax/flash/ui/onboarding/OnboardingScreen.kt`
 
 Two phones animating in TwoPhonesAnimation:
 - Phone offset: 1200ms `Restart` cycle (60dp → 8dp → 60dp)

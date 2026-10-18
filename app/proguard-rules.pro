@@ -1,5 +1,5 @@
 # Keep NFC payload data classes
--keep class com.example.flash.nfc.** { *; }
+-keep class com.dimax.flash.nfc.** { *; }
 
 # Ktor uses reflection for routing
 -keep class io.ktor.** { *; }
@@ -8,11 +8,11 @@
 # Kotlinx Serialization
 -keepattributes *Annotation*, InnerClasses
 -dontnote kotlinx.serialization.AnnotationsKt
--keep,includedescriptorclasses class com.example.flash.**$$serializer { *; }
--keepclassmembers class com.example.flash.** {
+-keep,includedescriptorclasses class com.dimax.flash.**$$serializer { *; }
+-keepclassmembers class com.dimax.flash.** {
     *** Companion;
 }
--keepclasseswithmembers class com.example.flash.** {
+-keepclasseswithmembers class com.dimax.flash.** {
     kotlinx.serialization.KSerializer serializer(...);
 }
 
