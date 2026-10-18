@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Received files are cached in cacheDir/transfers and update APKs in the app's external files folder;
+  Android never backs up either of them (there is no "cache" backup domain), so nothing needs
+  excluding. The settings (DataStore) in the files domain are backed up as usual.
+-->
 <data-extraction-rules>
-    <cloud-backup>
-        <exclude domain="cache" path="transfers/" />
-    </cloud-backup>
-    <device-transfer>
-        <exclude domain="cache" path="transfers/" />
-    </device-transfer>
+    <cloud-backup />
+    <device-transfer />
 </data-extraction-rules>
