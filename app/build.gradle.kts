@@ -30,20 +30,27 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // CI signs with the key stored in GitHub secrets (see .github/workflows/build.yml), which hands
+    // the decoded keystore to Gradle through these environment variables. Without them (local and
+    // sandbox builds) Android's own auto-generated debug key is used and nothing can be released.
     signingConfigs {
-        getByName("debug") {
-            storeFile = file("debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+        val keystorePath = System.getenv("KEYSTORE_FILE")
+        if (keystorePath != null) {
+            create("flash") {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS")
+                keyPassword = System.getenv("KEY_PASSWORD")
+            }
         }
     }
 
     buildTypes {
         debug {
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfigs.findByName("flash")?.let { signingConfig = it }
         }
         release {
+            signingConfigs.findByName("flash")?.let { signingConfig = it }
             isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

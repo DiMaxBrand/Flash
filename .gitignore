@@ -8,6 +8,6 @@ local.properties
 .externalNativeBuild/
 .cxx/
 *.keystore
-!debug.keystore
+*.jks
 app/build/
 .kotlin/
