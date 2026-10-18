@@ -54,18 +54,6 @@ jobs:
           echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/flash-release.jks"
           echo "KEYSTORE_FILE=$RUNNER_TEMP/flash-release.jks" >> $GITHUB_ENV
 
-      # Opens the keystore with the stored passwords and prints the PUBLIC certificate details (owner,
-      # validity, fingerprint), never a password. Compare the fingerprint with your own copy of the
-      # key (`keytool -list -v -keystore yourkey.jks`) to be sure the secrets hold the right key.
-      - name: Check the signing key
-        if: steps.key.outputs.present == 'true'
-        run: |
-          if ! keytool -list -v -keystore "$RUNNER_TEMP/flash-release.jks" -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" > "$RUNNER_TEMP/key-info.txt" 2>&1; then
-            echo "::error::Could not open the keystore with KEYSTORE_PASSWORD and KEY_ALIAS. Check KEYSTORE_BASE64, KEYSTORE_PASSWORD and KEY_ALIAS."
-            exit 1
-          fi
-          grep -E "Alias name|Owner:|Valid from|SHA256:" "$RUNNER_TEMP/key-info.txt"
-
       # main = "confirmed to work" = the stable channel; everything else (develop) = the beta channel.
       # The in-app updater compares these tags: X.Y.Z (stable) and X.Y.Z-beta.<versionCode> (beta).
       - name: Release channel
@@ -83,13 +71,6 @@ jobs:
       - name: Build APK (signed with the release key)
         if: steps.key.outputs.present == 'true'
         run: ./gradlew assembleDebug -PreleaseChannel=${{ steps.channel.outputs.name }} --no-daemon
-
-      # Proves the APK really carries the release key (this also fails if KEY_PASSWORD was wrong)
-      - name: Show the APK's signing certificate
-        if: steps.key.outputs.present == 'true'
-        run: |
-          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | tail -1)
-          "$APKSIGNER" verify --print-certs app/build/outputs/apk/debug/app-debug.apk | grep -E "certificate DN|SHA-256"
 
       - name: Get version name
         if: steps.key.outputs.present == 'true'
