@@ -4,17 +4,12 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
-// Bump both on every change that goes into the APK (see CLAUDE.md "Version Management Workflow").
-val appVersionCode = 56
-val appVersionName = "1.0.0, Oct 18"
-
-// The in-app updater compares semantic versions that match the GitHub release tags:
-//   stable (built from main):    X.Y.Z
-//   beta   (built from develop): X.Y.Z-beta.<versionCode>
-// CI passes -PreleaseChannel=stable for main; every other build (local, develop) is a beta.
-val appCoreVersion = Regex("""\d+\.\d+\.\d+""").find(appVersionName)!!.value
-val appReleaseChannel = (findProperty("releaseChannel") as String?) ?: "beta"
-val appUpdateVersion = if (appReleaseChannel == "stable") appCoreVersion else "$appCoreVersion-beta.$appVersionCode"
+// Edit these three lines for every release (see CLAUDE.md "Version Management Workflow").
+//   appVersionName: X.Y.Z for a stable release, X.Y.Z-beta.N for a beta. This string IS the GitHub
+//                   release tag, and the in-app updater compares it, so it must be valid semver.
+//   appVersionCode: must increase on every build that is published.
+val appVersionCode = 57
+val appVersionName = "1.0.0-beta.1"
 
 android {
     namespace = "com.dimax.flash"
@@ -26,7 +21,7 @@ android {
         targetSdk = 35
         versionCode = appVersionCode
         versionName = appVersionName
-        buildConfigField("String", "UPDATE_VERSION", "\"$appUpdateVersion\"")
+        buildConfigField("String", "UPDATE_VERSION", "\"$appVersionName\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -148,7 +143,3 @@ tasks.register("printVersionName") {
     doLast { println(appVersionName) }
 }
 
-// The GitHub release tag for this build (X.Y.Z or X.Y.Z-beta.N), used by CI
-tasks.register("printUpdateTag") {
-    doLast { println(appUpdateVersion) }
-}

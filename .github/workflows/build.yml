@@ -1,8 +1,18 @@
 name: Build & Release APK
 
+# Manual only: a release is made when you run this workflow by hand (Actions tab, Run workflow).
+# The title and description are optional; without a title the release is named "Flash <version>".
 on:
-  push:
-    branches: [ main, develop ]
+  workflow_dispatch:
+    inputs:
+      title:
+        description: 'Release title (optional, default: "Flash <version>"). Short changelog headline.'
+        required: false
+        type: string
+      description:
+        description: 'Release description (optional, shown above the commit notes).'
+        required: false
+        type: string
 
 jobs:
   build:
@@ -10,6 +20,8 @@ jobs:
     permissions:
       contents: write
     env:
+      INPUT_TITLE: ${{ inputs.title }}
+      INPUT_DESCRIPTION: ${{ inputs.description }}
       # The signing key lives in GitHub Actions secrets (Settings > Secrets and variables > Actions):
       #   KEYSTORE_BASE64    the .jks file, base64-encoded (e.g. `base64 -w0 flash.jks`)
       #   KEYSTORE_PASSWORD  the keystore password
@@ -54,42 +66,38 @@ jobs:
           echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/flash-release.jks"
           echo "KEYSTORE_FILE=$RUNNER_TEMP/flash-release.jks" >> $GITHUB_ENV
 
-      # main = "confirmed to work" = the stable channel; everything else (develop) = the beta channel.
-      # The in-app updater compares these tags: X.Y.Z (stable) and X.Y.Z-beta.<versionCode> (beta).
-      - name: Release channel
-        if: steps.key.outputs.present == 'true'
-        id: channel
-        run: |
-          if [ "$GITHUB_REF_NAME" = "main" ]; then
-            echo "name=stable" >> $GITHUB_OUTPUT
-            echo "prerelease=false" >> $GITHUB_OUTPUT
-          else
-            echo "name=beta" >> $GITHUB_OUTPUT
-            echo "prerelease=true" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Build APK (signed with the release key)
-        if: steps.key.outputs.present == 'true'
-        run: ./gradlew assembleDebug -PreleaseChannel=${{ steps.channel.outputs.name }} --no-daemon
-
-      - name: Get version name
+      # The release comes entirely from build.gradle.kts: appVersionName is the tag and the release
+      # is a pre-release when it has a -beta.N suffix (no branch rules). Stable is plain X.Y.Z.
+      - name: Read the version from the build
         if: steps.key.outputs.present == 'true'
         id: version
         run: |
           VERSION=$(./gradlew -q printVersionName --no-daemon)
-          TAG=$(./gradlew -q printUpdateTag -PreleaseChannel=${{ steps.channel.outputs.name }} --no-daemon)
-          # "0.12.0-updater, Oct 18" -> "updater"
-          SHORT_NAME=$(echo "$VERSION" | sed -E 's/^[0-9.]+-?//; s/, .*$//')
-          echo "tag=${TAG}" >> $GITHUB_OUTPUT
-          echo "name=Flash ${TAG}: ${SHORT_NAME}" >> $GITHUB_OUTPUT
-          # The release notes the update sheet shows: the commit message without the trailer lines
+          case "$VERSION" in
+            *-*) PRERELEASE=true ;;
+            *)   PRERELEASE=false ;;
+          esac
+          echo "tag=${VERSION}" >> $GITHUB_OUTPUT
+          echo "prerelease=${PRERELEASE}" >> $GITHUB_OUTPUT
+          TITLE="${INPUT_TITLE:-Flash ${VERSION}}"
+          echo "name=${TITLE}" >> $GITHUB_OUTPUT
+          # Release notes (the update sheet shows them as "What's new"): the optional description,
+          # then the commit message without the trailer lines
           {
             echo "body<<RELEASE_NOTES_EOF"
+            if [ -n "$INPUT_DESCRIPTION" ]; then
+              echo "$INPUT_DESCRIPTION"
+              echo
+            fi
             git log -1 --format=%B | grep -v -E '^(Co-Authored-By|Claude-Session):' || true
             echo
             echo "Build ${VERSION} from commit ${GITHUB_SHA::7}."
             echo "RELEASE_NOTES_EOF"
           } >> $GITHUB_OUTPUT
+
+      - name: Build APK (signed with the release key)
+        if: steps.key.outputs.present == 'true'
+        run: ./gradlew assembleDebug --no-daemon
 
       - name: Create Release & upload APK
         if: steps.key.outputs.present == 'true'
@@ -98,6 +106,6 @@ jobs:
           tag_name: ${{ steps.version.outputs.tag }}
           name: ${{ steps.version.outputs.name }}
           body: ${{ steps.version.outputs.body }}
-          prerelease: ${{ steps.channel.outputs.prerelease }}
+          prerelease: ${{ steps.version.outputs.prerelease }}
           files: app/build/outputs/apk/debug/app-debug.apk
-          make_latest: ${{ steps.channel.outputs.prerelease == 'false' }}
+          make_latest: ${{ steps.version.outputs.prerelease == 'false' }}
