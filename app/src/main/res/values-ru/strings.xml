@@ -41,6 +41,9 @@
     <string name="hotspot_button_enable">Включить точку доступа</string>
     <string name="hotspot_button_cancel">Не сейчас</string>
 
+    <string name="nfc_read_failed_title">Не удалось прочитать другой телефон</string>
+    <string name="nfc_read_failed_text">Контакт прервался слишком рано. Приложите телефоны друг к другу ещё раз и подержите неподвижно.</string>
+
     <!-- Обновления приложения (из Impulse) -->
     <string name="download_eta_seconds">Осталось %1$d с</string>
     <string name="download_eta_minutes_seconds">Осталось %1$d мин %2$d с</string>

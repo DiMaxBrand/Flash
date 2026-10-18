@@ -5,8 +5,8 @@ plugins {
 }
 
 // Bump both on every change that goes into the APK (see CLAUDE.md "Version Management Workflow").
-val appVersionCode = 52
-val appVersionName = "0.12.1-many-photos, Oct 18"
+val appVersionCode = 53
+val appVersionName = "0.12.2-nfc-retry, Oct 18"
 
 // The in-app updater compares semantic versions that match the GitHub release tags:
 //   stable (built from main):    X.Y.Z

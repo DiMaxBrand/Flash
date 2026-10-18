@@ -65,7 +65,9 @@ fun displayName(context: Context, uri: Uri): String {
             }
         }
     }
-    return uri.lastPathSegment?.substringAfterLast('/') ?: "file"
+    val name = uri.lastPathSegment?.substringAfterLast('/') ?: "file"
+    // Received files are cached as "<index>_<name>": show (and resend) the real name
+    return if (uri.scheme == "file") name.replaceFirst(Regex("^\\d+_"), "") else name
 }
 
 /** First frame of a video, at most [maxSide] px on its long side, or null. */

@@ -68,6 +68,16 @@ class NfcManager(private val context: Context) {
         _status.update { (it + line).takeLast(6) }
     }
 
+    /** A touch that reached a phone but could not be read (contact too short, no handshake, ...). */
+    private val _readFailed = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val readFailed: SharedFlow<String> = _readFailed.asSharedFlow()
+
+    /** Logs the reason (kept for diagnosing) and tells the screen to ask for another touch. */
+    private fun fail(reason: String) {
+        log(reason)
+        _readFailed.tryEmit(reason)
+    }
+
     fun initialize(act: Activity) {
         activity = act
     }
@@ -156,32 +166,39 @@ class NfcManager(private val context: Context) {
             iso.connect()
             iso.timeout = 3000
             var reply = iso.transceive(selectAid(HandshakeHceService.CUSTOM_AID))
+            var ownApp = true
             if (!ok(reply)) {
                 log("our app: sw=${sw(reply)}, trying the standard NDEF app")
+                ownApp = false
                 reply = iso.transceive(selectAid(HandshakeHceService.NDEF_AID))
-                if (!ok(reply)) { log("no Flash handshake on that phone (sw=${sw(reply)})"); return }
+                if (!ok(reply)) { fail("no Flash handshake on that phone (sw=${sw(reply)})"); return }
             }
             reply = iso.transceive(byteArrayOf(0x00, 0xA4.toByte(), 0x00, 0x0C, 0x02, 0xE1.toByte(), 0x04))
-            if (!ok(reply)) { log("select NDEF file: sw=${sw(reply)}"); return }
+            if (!ok(reply)) { fail("select NDEF file: sw=${sw(reply)}"); return }
 
-            reply = iso.transceive(readBinary(0, 2))
-            if (!ok(reply) || reply.size < 4) { log("read length: sw=${sw(reply)}"); return }
+            // As few round trips as possible: a short touch is all it takes. Our own app answers
+            // big reads, so the length and (normally) the whole message arrive in ONE read; the
+            // standard application only promises 59 bytes per read.
+            val chunk = if (ownApp) 250 else 48
+            reply = iso.transceive(readBinary(0, chunk))
+            if (!ok(reply) || reply.size < 4) { fail("read length: sw=${sw(reply)}"); return }
             val length = ((reply[0].toInt() and 0xFF) shl 8) or (reply[1].toInt() and 0xFF)
-            if (length <= 0 || length > 1022) { log("nothing to share yet (length $length)"); return }
+            if (length <= 0 || length > 1022) { fail("nothing to share yet (length $length)"); return }
 
             val message = ByteArray(length)
-            var offset = 0
-            while (offset < length) {
-                val chunk = minOf(48, length - offset)
-                reply = iso.transceive(readBinary(offset + 2, chunk))
-                if (!ok(reply) || reply.size < chunk + 2) { log("read at $offset: sw=${sw(reply)}"); return }
-                reply.copyInto(message, offset, 0, chunk)
-                offset += chunk
+            var have = minOf(reply.size - 2 - 2, length)          // bytes of the message in the first reply
+            reply.copyInto(message, 0, 2, 2 + have)
+            while (have < length) {
+                val n = minOf(chunk, length - have)
+                reply = iso.transceive(readBinary(have + 2, n))
+                if (!ok(reply) || reply.size < n + 2) { fail("read at $have: sw=${sw(reply)}"); return }
+                reply.copyInto(message, have, 0, n)
+                have += n
             }
             log("read $length bytes")
             parseAndEmit(NdefMessage(message))
         } catch (e: Exception) {
-            log("read failed: ${e.javaClass.simpleName}: ${e.message ?: "contact lost, hold still"}")
+            fail("read failed: ${e.javaClass.simpleName}: ${e.message ?: "contact lost, hold still"}")
         } finally {
             runCatching { iso.close() }
         }
@@ -277,6 +294,6 @@ class NfcManager(private val context: Context) {
             _peerHandshakeFlow.tryEmit(handshake)
             return
         }
-        log("message had no Flash handshake")
+        fail("message had no Flash handshake")
     }
 }

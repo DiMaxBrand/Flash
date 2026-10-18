@@ -122,8 +122,11 @@ class FileServer(private val scope: CoroutineScope) {
 
     private fun buildMeta(index: Int): PreviewMeta? = metaCache[index] ?: runCatching {
         val uri = entries.getOrNull(index)?.second ?: return null
-        val mime = appContext!!.contentResolver.getType(uri) ?: "application/octet-stream"
         val name = com.example.flash.ui.workbench.displayName(appContext!!, uri)
+        // file:// Uris (photos received earlier and sent on) have no type from the resolver: use the extension
+        val mime = appContext!!.contentResolver.getType(uri)
+            ?: com.example.flash.ui.workbench.mimeOfName(name)
+            ?: "application/octet-stream"
         val size = fileSizeOf(uri)
         val mediaKind = com.example.flash.ui.workbench.kindOfMime(mime)
         // Anything that is not a picture is announced with its name; videos also get a first-frame poster
@@ -323,7 +326,9 @@ class FileServer(private val scope: CoroutineScope) {
                     }
                     val fileUri = entry.second
                     val cr = appContext!!.contentResolver
-                    val mimeType = cr.getType(fileUri) ?: "application/octet-stream"
+                    val mimeType = cr.getType(fileUri)
+                        ?: com.example.flash.ui.workbench.mimeOfName(com.example.flash.ui.workbench.displayName(appContext!!, fileUri))
+                        ?: "application/octet-stream"
                     val fileName = com.example.flash.ui.workbench.displayName(appContext!!, fileUri)
                         .map { if (it.code in 32..126 && it != '"' && it != '\\' && it != '/') it else '_' }.joinToString("")
                     val fileSize = cr.openFileDescriptor(fileUri, "r")?.use { it.statSize } ?: 0L

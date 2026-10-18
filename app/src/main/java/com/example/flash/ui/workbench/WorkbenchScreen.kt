@@ -385,6 +385,23 @@ fun WorkbenchScreen(
     )
     var showAddMenu by remember { mutableStateOf(false) }
 
+    // A touch that reached the other phone but could not be read (too short, lost contact): ask again.
+    // The details stay in the NFC status box for diagnosing.
+    var nfcReadFailed by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { nfcManager.readFailed.collect { nfcReadFailed = true } }
+    LaunchedEffect(uiState.nfcState) { if (uiState.nfcState is NfcUiState.PeerDetected) nfcReadFailed = false }
+    LaunchedEffect(nfcReadFailed) { if (nfcReadFailed) { delay(8000); nfcReadFailed = false } }
+    if (nfcReadFailed && nfcOn) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { nfcReadFailed = false },
+            title = { Text(stringResource(R.string.nfc_read_failed_title)) },
+            text = { Text(stringResource(R.string.nfc_read_failed_text)) },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { nfcReadFailed = false }) { Text("OK") }
+            }
+        )
+    }
+
     // ── Interface style: the Material 3 Expressive layout replaces the whole liquid UI ──
     val uiStyle by app.themeRepository.uiStyle.collectAsStateWithLifecycle(UiStyle.LIQUID)
     if (uiStyle == UiStyle.EXPRESSIVE) {

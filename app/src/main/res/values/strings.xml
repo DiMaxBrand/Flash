@@ -41,6 +41,9 @@
     <string name="hotspot_button_enable">Turn On Hotspot</string>
     <string name="hotspot_button_cancel">Not now</string>
 
+    <string name="nfc_read_failed_title">Couldn\'t read the other phone</string>
+    <string name="nfc_read_failed_text">The phones lost contact too soon. Touch them together again and hold still for a moment.</string>
+
     <!-- App updates (ported from Impulse) -->
     <string name="download_eta_seconds">%1$ds left</string>
     <string name="download_eta_minutes_seconds">%1$dm %2$ds left</string>
