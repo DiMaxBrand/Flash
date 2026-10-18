@@ -41,7 +41,7 @@ Verify build succeeds: `./gradlew clean assembleDebug`
 
 ### Branch Model
 - **`develop`** — the cutting edge. All work lands here; every push builds the APK in CI and publishes a GitHub release (`.github/workflows/build.yml`).
-- **`main`** — "known to work". **Current phase: the app does not yet reliably transfer files, so `main` is kept identical to `develop`** (push both). **Once the user says transfers work (even badly), stop syncing**: `main` then only moves to a `develop` state the user has confirmed works, and `develop` keeps running ahead. Do not assume that switch has happened until the user says so.
+- **`main`** — "known to work". **Current phase (since Oct 18): transfers work (NFC pairing + Wi-Fi transfer verified on a Redmi Note and a Galaxy S24), so `main` is NO LONGER synced with `develop`.** `main` only moves to a `develop` state the user has explicitly confirmed works; `develop` keeps running ahead. First confirmed build: **0.11.0 (versionCode 50), commit a971521** (main points at the docs-only commit right after it). Never push `develop:main` on your own again — ask the user which build to promote. When promoting, prefer a commit whose message contains `[skip ci]` or accept the duplicate release run.
 - The workflow file must exist on a branch for pushes to it to build — keep `.github/workflows/build.yml` identical on `develop` and `main`.
 - Other branches are legacy/session leftovers (`claude-code`, `claude/*`): never base new work on them. The cloud session harness may hand you a `claude/...` branch; push your work to it if told, but also land it on `develop`.
 
@@ -52,7 +52,7 @@ The user develops without a computer and installs APKs from GitHub releases. The
 ```
 1. Change code on develop, bump versionCode/versionName (see Version Management)
 2. ./gradlew assembleDebug  — must pass
-3. git push origin develop   (and, while in the "main = develop" phase, git push origin develop:main)
+3. git push origin develop   (do NOT push main: it only moves when the user confirms a build works)
 4. CI builds and publishes the release; give the user the release link
 ```
 
