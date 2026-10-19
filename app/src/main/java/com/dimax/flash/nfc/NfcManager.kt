@@ -89,6 +89,13 @@ class NfcManager(private val context: Context) {
     private var lastTokenAt = 0L
     private var readerOn = false
 
+    // The playground's lab experiments take over the tag themselves (see NfcLab.readerSession)
+    @Volatile private var labReader: ((Tag, IsoDep) -> Unit)? = null
+
+    fun setLabReader(handler: ((Tag, IsoDep) -> Unit)?) {
+        labReader = handler
+    }
+
     init {
         HandshakeHceService.listener = { log(it) }
     }
@@ -189,6 +196,10 @@ class NfcManager(private val context: Context) {
         val iso = IsoDep.get(tag)
         if (iso == null) {
             log("touched something that is not a phone (${tag.techList.joinToString { it.substringAfterLast('.') }})")
+            return
+        }
+        labReader?.let {
+            it(tag, iso)
             return
         }
         try {

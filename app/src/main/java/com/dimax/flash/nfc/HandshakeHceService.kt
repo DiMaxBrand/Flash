@@ -2,6 +2,7 @@ package com.dimax.flash.nfc
 
 import android.nfc.cardemulation.HostApduService
 import android.os.Bundle
+import com.dimax.flash.playground.NfcLab
 
 /**
  * Host Card Emulation: the sending phone answers NFC like an NFC Forum Type 4 tag whose single NDEF
@@ -50,6 +51,10 @@ class HandshakeHceService : HostApduService() {
 
     override fun processCommandApdu(commandApdu: ByteArray?, extras: Bundle?): ByteArray {
         if (commandApdu == null || commandApdu.size < 4) return UNKNOWN_INS
+        if (NfcLab.cardActive) {
+            NfcLab.noteCommand(commandApdu)
+            if (commandApdu[0] == NfcLab.CLA && commandApdu.size >= 5) return NfcLab.onCardApdu(commandApdu)
+        }
         val ins = commandApdu[1].toInt() and 0xFF
         val p1 = commandApdu[2].toInt() and 0xFF
 
@@ -115,6 +120,7 @@ class HandshakeHceService : HostApduService() {
 
     override fun onDeactivated(reason: Int) {
         selectedFile = 0
+        NfcLab.cardDropped(reason)
         listener?.invoke("card: link ended (${if (reason == DEACTIVATION_LINK_LOSS) "lost contact" else "reader moved on"})")
     }
 }

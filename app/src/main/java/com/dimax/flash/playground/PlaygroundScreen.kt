@@ -36,17 +36,18 @@ import kotlin.random.Random
 private const val TRIALS = 10
 
 private enum class Experiment(val label: String) {
-    WIFI("Wi-Fi tag"), CONTACT("Contact card"), LINK("Link tag"), BLINK("Blink test")
+    WIFI("Wi-Fi tag"), CONTACT("Contact card"), LINK("Link tag"), BLINK("Blink test"),
+    STOPWATCH("Handshake stopwatch"), RACE("Touch race"), TAP("Tap together"),
+    RELAY("Relay chain"), FIELD("Contact time"), HOLD("Hold test")
 }
 
 /**
  * Experiments with NFC and the phones. Experimental and English-only for now.
- * - Wi-Fi tag: one phone shares a network as a tag, the other reads it and offers it to Android.
- * - Contact card: one phone shares typed-in contact details as a vCard; the other saves them after a tap.
- * - Link tag: one phone shares a web address; the other opens it after a tap (web links only).
- * - Blink test: the leader fires blinks at unannounced moments; the follower flashes when it hears
- *   about each one, and both phones report their times, so the gap can be measured. NFC pairs the
- *   phones; the timing runs over Wi-Fi.
+ * - Wi-Fi tag, contact card, link tag: one phone shares, the other reads (and acts after a tap).
+ * - Blink test: the leader fires blinks at unannounced moments; the follower flashes and reports its time.
+ * - Lab (NFC link timing): handshake stopwatch, touch race, tap together, relay chain, contact time and the
+ *   hold test (1 MB stream, text ping-pong, quiet). Each phone shows its own side: the card and the
+ *   reader see different things, and only the card learns when the link drops for sure.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,6 +65,7 @@ fun PlaygroundScreen(nfcManager: NfcManager, onBack: () -> Unit) {
     var contactEmail by rememberSaveable { mutableStateOf("") }
     var link by rememberSaveable { mutableStateOf("") }
     var leader by rememberSaveable { mutableStateOf(false) }
+    var holdMode by rememberSaveable { mutableStateOf(LabMode.STREAM) }
     var status by remember { mutableStateOf("Pick an experiment.") }
     var log by remember { mutableStateOf(listOf<String>()) }
     var deltas by remember { mutableStateOf(listOf<Long>()) }
@@ -72,7 +74,22 @@ fun PlaygroundScreen(nfcManager: NfcManager, onBack: () -> Unit) {
     var linkIn by remember { mutableStateOf<String?>(null) }
     var blinkCard by remember { mutableStateOf<android.nfc.NdefMessage?>(null) }
     var blinkServer by remember { mutableStateOf<BlinkServer?>(null) }
+    var snap by remember { mutableStateOf(LabSnapshot()) }
+    var wifi by remember { mutableStateOf("") }
+    var relayText by remember { mutableStateOf("") }
     val running = remember { AtomicBoolean(false) }
+    val tapSensor = remember(context) { TapSensor(context.applicationContext) }
+
+    val labMode: LabMode? = when (experiment) {
+        Experiment.STOPWATCH -> LabMode.STOPWATCH
+        Experiment.RACE -> LabMode.RACE
+        Experiment.TAP -> LabMode.TAP
+        Experiment.RELAY -> LabMode.RELAY
+        Experiment.FIELD -> LabMode.FIELD
+        Experiment.HOLD -> holdMode
+        else -> null
+    }
+    val labCardOn = labMode != null && sharing
 
     // Only one side can be a card: the sharing phone or the leader. The other one reads.
     val cardWanted = if (experiment == Experiment.BLINK) leader else sharing
@@ -102,6 +119,41 @@ fun PlaygroundScreen(nfcManager: NfcManager, onBack: () -> Unit) {
         onDispose {
             running.set(false)
             blinkServer?.stop()
+        }
+    }
+
+    // Lab: the card side answers the experiment's commands while a lab card is on
+    DisposableEffect(labCardOn, labMode) {
+        labMode?.let { if (labCardOn) NfcLab.startCard(context, it) }
+        onDispose { if (labCardOn) NfcLab.stopCard() }
+    }
+    LaunchedEffect(labCardOn, labMode) {
+        if (labCardOn && labMode == LabMode.RACE) NfcLab.listenForRaces()
+    }
+    DisposableEffect(labMode) {
+        if (labMode == LabMode.TAP) {
+            tapSensor.start()
+            NfcLab.cardPeakSource = { tapSensor.all() }
+        }
+        onDispose {
+            tapSensor.stop()
+            NfcLab.cardPeakSource = null
+        }
+    }
+    // Lab: the reader side takes the tag itself while the phone is not a card
+    DisposableEffect(labMode, labCardOn) {
+        val mode = labMode
+        if (mode != null && !labCardOn) {
+            nfcManager.setLabReader { tag, iso -> NfcLab.readerSession(tag, iso, mode, tapSensor) }
+        }
+        onDispose { nfcManager.setLabReader(null) }
+    }
+    LaunchedEffect(Unit) {
+        while (true) {
+            snap = NfcLab.snapshot()
+            wifi = NfcLab.wifiLine(context)
+            relayText = String(NfcLab.relay, Charsets.UTF_8)
+            delay(300)
         }
     }
 
@@ -204,6 +256,7 @@ fun PlaygroundScreen(nfcManager: NfcManager, onBack: () -> Unit) {
                     val target = PlaygroundNdef.parseTarget(message)
                     if (target == null) status = "Not a blink target." else startFollower(target)
                 }
+                else -> Unit
             }
         }
     }
@@ -269,6 +322,53 @@ fun PlaygroundScreen(nfcManager: NfcManager, onBack: () -> Unit) {
                                 style = MaterialTheme.typography.bodyMedium
                             )
                         }
+                    } else if (labMode != null) {
+                        val isRelay = experiment == Experiment.RELAY
+                        Text(labHint(experiment), style = MaterialTheme.typography.bodyMedium)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(
+                                selected = sharing,
+                                onClick = { sharing = true },
+                                label = { Text(if (isRelay) "Forward (card)" else "Card") }
+                            )
+                            FilterChip(
+                                selected = !sharing,
+                                onClick = { sharing = false },
+                                label = { Text(if (isRelay) "Receive (reader)" else "Reader") }
+                            )
+                        }
+                        if (experiment == Experiment.HOLD) {
+                            Row(
+                                Modifier.horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf(
+                                    LabMode.STREAM to "1 MB stream",
+                                    LabMode.PINGPONG to "Text ping-pong",
+                                    LabMode.QUIET to "Quiet"
+                                ).forEach { (mode, name) ->
+                                    FilterChip(
+                                        selected = holdMode == mode,
+                                        onClick = { holdMode = mode },
+                                        label = { Text(name) }
+                                    )
+                                }
+                            }
+                            Text("Choose the variant before touching.")
+                        }
+                        if (isRelay && sharing) {
+                            Text("Chain so far: ${relayText.ifEmpty { "(empty)" }}")
+                            OutlinedButton(onClick = { NfcLab.relay = "start".toByteArray(Charsets.UTF_8) }) {
+                                Text("Start a new chain here")
+                            }
+                        }
+                        Text(
+                            when {
+                                sharing -> "Keep this phone on this screen while the other one touches it."
+                                else -> "Touch the other phone and hold still. Lift to end the touch."
+                            }
+                        )
+                        LabReport(snap, wifi)
                     } else {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             FilterChip(selected = sharing, onClick = { sharing = true }, label = { Text("Share (card)") })
@@ -336,7 +436,7 @@ fun PlaygroundScreen(nfcManager: NfcManager, onBack: () -> Unit) {
                                         modifier = Modifier.fillMaxWidth()
                                     )
                                 }
-                                Experiment.BLINK -> Unit
+                                else -> Unit
                             }
                         } else {
                             Text(
@@ -344,7 +444,7 @@ fun PlaygroundScreen(nfcManager: NfcManager, onBack: () -> Unit) {
                                     Experiment.WIFI -> "Touch a phone that is sharing a network. Android may ask you to confirm."
                                     Experiment.CONTACT -> "Touch a phone that is sharing a contact card, then tap Save contact."
                                     Experiment.LINK -> "Touch a phone that is sharing a link, then tap Open link."
-                                    Experiment.BLINK -> ""
+                                    else -> ""
                                 }
                             )
                         }
@@ -378,13 +478,59 @@ fun PlaygroundScreen(nfcManager: NfcManager, onBack: () -> Unit) {
                         }
                     }
 
-                    Text(status, style = MaterialTheme.typography.bodyMedium)
-                    log.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+                    if (labMode == null) {
+                        Text(status, style = MaterialTheme.typography.bodyMedium)
+                        log.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+                    }
                 }
             }
             if (flashOn) {
                 Box(Modifier.fillMaxSize().background(Color.White))
             }
         }
+    }
+}
+
+private fun labHint(experiment: Experiment): String = when (experiment) {
+    Experiment.STOPWATCH -> "The card serves the handshake. The reader touches, then lifts. Shows the time from touch to select and to the first answer."
+    Experiment.RACE -> "Touch the phones once. The card records when its first command arrived; the reader sends its touch time over Wi-Fi, so the gap can be compared."
+    Experiment.TAP -> "Hold the two phones and tap them together on a table. Each accelerometer records the jolt; the reader sends its jolt times over NFC."
+    Experiment.RELAY -> "Start a chain on one phone (Forward). Each next phone touches it as Receive (reader), adds its hop time, then switches to Forward."
+    Experiment.FIELD -> "The reader sends small pings while the phones stay together. The card reports how long they were in contact and the longest pause."
+    Experiment.HOLD -> "Pick a variant before touching. 1 MB stream pulls a photo over and over, text ping-pong trades messages, quiet syncs once and then sends nothing."
+    else -> ""
+}
+
+@Composable
+private fun LabReport(snap: LabSnapshot, wifi: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("Role: ${snap.role.ifEmpty { "none yet" }} · touches: ${snap.touches}")
+        if (snap.sessionMs > 0) Text("Time in contact: ${snap.sessionMs} ms")
+        Text("Moved: ${snap.bytes / 1024} KB · speed: ${"%.1f".format(snap.speedKBs)} KB/s")
+        if (snap.rtt.isNotEmpty()) {
+            Text("Round trip: min ${snap.rtt[0]} ms · median ${snap.rtt[1]} ms · max ${snap.rtt[2]} ms")
+        }
+        if (snap.maxGapMs > 0) Text("Longest pause between commands: ${snap.maxGapMs} ms")
+        if (snap.passes > 0) Text("1 MB photos sent: ${snap.passes}")
+        if (snap.races.isNotEmpty()) {
+            Text("Touch race, ms the card's first command came after the reader's touch: ${snap.races.joinToString()}")
+        }
+        if (snap.taps.isNotEmpty()) Text(snap.taps)
+        if (snap.tag.isNotEmpty()) Text("Tag: ${snap.tag}")
+        if (snap.lostAt.isNotEmpty()) {
+            Text(
+                "Connection lost at ${snap.lostAt}: ${snap.lostReason}",
+                color = MaterialTheme.colorScheme.error
+            )
+        } else if (snap.sessionMs > 0) {
+            Text("No drop seen by this phone.")
+        }
+        if (snap.note.isNotEmpty()) Text(snap.note)
+        if (wifi.isNotEmpty()) Text(wifi)
+        Text(
+            "Android does not expose NFC field strength. Round-trip time is the closest NFC measure; " +
+                "the Wi-Fi signal is for the network both phones use.",
+            style = MaterialTheme.typography.bodySmall
+        )
     }
 }
