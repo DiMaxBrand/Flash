@@ -9,6 +9,7 @@ import android.net.wifi.WifiManager
 import android.nfc.Tag
 import android.nfc.cardemulation.HostApduService
 import android.nfc.tech.IsoDep
+import android.os.Build
 import com.dimax.flash.nfc.HandshakeHceService
 import com.dimax.flash.util.LocalNetwork
 import kotlinx.coroutines.delay
@@ -61,6 +62,8 @@ object NfcLab {
     private const val INS_PUSH = 0xD2
     private const val INS_PING = 0xD3
     private const val CHUNK = 240
+    /** Extended-length PULL: one exchange can carry this much when both ends support it. */
+    private const val EXTENDED_CHUNK = 4096
     private const val PASS_BYTES = 1 shl 20
     private val CUSTOM_AID = HandshakeHceService.CUSTOM_AID
     private val OK = byteArrayOf(0x90.toByte(), 0x00)
@@ -134,8 +137,11 @@ object NfcLab {
     /** The lab commands. Anything else is left to the handshake logic in [HandshakeHceService]. */
     fun onCardApdu(apdu: ByteArray): ByteArray {
         val ins = apdu[1].toInt() and 0xFF
-        val lc = apdu[4].toInt() and 0xFF
-        val data = apdu.copyOfRange(5, minOf(apdu.size, 5 + lc))
+        // Extended form: a 0x00 byte, then a two-byte length. Short commands never have a 0x00 Lc with data.
+        val extended = apdu.size >= 7 && apdu[4].toInt() == 0
+        val lc = if (extended) ((apdu[5].toInt() and 0xFF) shl 8) or (apdu[6].toInt() and 0xFF) else apdu[4].toInt() and 0xFF
+        val start = if (extended) 7 else 5
+        val data = apdu.copyOfRange(minOf(apdu.size, start), minOf(apdu.size, start + lc))
         return when (ins) {
             INS_HELLO -> withOk(helloJson().toByteArray(Charsets.UTF_8))
             INS_PULL -> pullReply(data)
@@ -259,7 +265,7 @@ object NfcLab {
     }
 
     private fun relayHop(iso: IsoDep, size: Int, touchAt: Long) {
-        val payload = pullAll(iso, size)
+        val payload = Puller(iso, size) { note(it) }.readAll()
         val hop = System.currentTimeMillis() - touchAt
         relay = (String(payload, Charsets.UTF_8) + " | $hop ms").toByteArray(Charsets.UTF_8)
         note("received ${payload.size} bytes, hop $hop ms. Now set this phone to Forward and touch the next one.")
@@ -270,8 +276,9 @@ object NfcLab {
             note("the other phone has nothing to stream")
             return
         }
+        val puller = Puller(iso, size) { note(it) }
         while (true) {
-            val got = pullAll(iso, size)
+            val got = puller.readAll()
             if (got.size < size) {
                 note("stream stopped early: ${got.size} of $size bytes")
                 return
@@ -300,19 +307,50 @@ object NfcLab {
         note("quiet for 2 minutes with no traffic. The card reports the drop.")
     }
 
-    /** Reads the whole served data in chunks. Stops early if the card answers with an error. */
-    private fun pullAll(iso: IsoDep, size: Int): ByteArray {
-        val out = ByteArrayOutputStream()
-        var offset = 0
-        while (offset < size) {
-            val reply = exchange(iso, command(INS_PULL, ByteBuffer.allocate(4).putInt(offset).array(), le = true))
-            if (!ok(reply)) break
-            val part = body(reply)
-            if (part.isEmpty()) break
-            out.write(part)
-            offset += part.size
+    /**
+     * Reads the served data in exchanges. Tries extended-length exchanges (4 KB each) when the phone
+     * supports them, and drops to 240-byte exchanges for good on the first error reply.
+     * Stops early if even the short form is refused.
+     */
+    private class Puller(private val iso: IsoDep, private val size: Int, private val onNote: (String) -> Unit) {
+        var extended = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && iso.isExtendedLengthApduSupported
+        var reported = false
+
+        fun readAll(): ByteArray {
+            if (!reported) {
+                reported = true
+                onNote(
+                    if (extended) "stream: extended exchanges of $EXTENDED_CHUNK bytes"
+                    else "stream: 240-byte exchanges (extended not supported here)"
+                )
+            }
+            val out = ByteArrayOutputStream()
+            var offset = 0
+            while (offset < size) {
+                var part = if (extended) pullExtended(offset) else null
+                if (part == null && extended) {
+                    extended = false
+                    onNote("stream: extended not answered, falling back to 240-byte exchanges")
+                }
+                if (part == null) part = pullShort(offset)
+                if (part == null || part.isEmpty()) break
+                out.write(part)
+                offset += part.size
+            }
+            return out.toByteArray()
         }
-        return out.toByteArray()
+
+        private fun pullExtended(offset: Int): ByteArray? {
+            val header = byteArrayOf(CLA, INS_PULL.toByte(), 0, 0, 0, 0, 6)
+            val args = ByteBuffer.allocate(6).putInt(offset).putShort(EXTENDED_CHUNK.toShort()).array()
+            val reply = exchange(iso, header + args)
+            return if (ok(reply)) body(reply) else null
+        }
+
+        private fun pullShort(offset: Int): ByteArray? {
+            val reply = exchange(iso, command(INS_PULL, ByteBuffer.allocate(4).putInt(offset).array(), le = true))
+            return if (ok(reply)) body(reply) else null
+        }
     }
 
     private fun readerLost(reason: String) {
@@ -363,7 +401,9 @@ object NfcLab {
         val offset = ByteBuffer.wrap(data).int
         val served = servedData()
         if (offset < 0 || offset >= served.size) return END_OF_DATA
-        val n = minOf(CHUNK, served.size - offset)
+        // A reader that asks for a length (extended form) gets up to that much; short commands get 240 bytes
+        val asked = if (data.size >= 6) ((data[4].toInt() and 0xFF) shl 8) or (data[5].toInt() and 0xFF) else CHUNK
+        val n = minOf(asked.coerceIn(1, EXTENDED_CHUNK), served.size - offset)
         synchronized(lock) { addBytes(System.currentTimeMillis(), n) }
         return withOk(served.copyOfRange(offset, offset + n))
     }
