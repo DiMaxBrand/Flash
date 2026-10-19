@@ -67,11 +67,7 @@ class NfcManager(private val context: Context) {
     }
 
     private fun routeRead(message: NdefMessage) {
-        val playground = message.records.any {
-            val type = String(it.type, Charsets.US_ASCII)
-            type == com.dimax.flash.playground.PLAYGROUND_MIME || type == com.dimax.flash.playground.WSC_MIME
-        }
-        if (playground) {
+        if (com.dimax.flash.playground.PlaygroundNdef.isPlayground(message)) {
             log("playground tag read")
             _readNdef.value = message
         } else {
