@@ -61,6 +61,7 @@ fun SettingsScreen(
     themeRepository: ThemeRepository,
     workbenchViewModel: WorkbenchViewModel?,
     updates: UpdateController,
+    onOpenPlayground: () -> Unit,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -100,6 +101,7 @@ fun SettingsScreen(
                         SettingsGroups(
                             themeRepository = themeRepository,
                             showSimulation = workbenchViewModel != null,
+                            onOpenPlayground = onOpenPlayground,
                             onOpenSimulation = { showSimulation = true },
                             onLanguage = { lang ->
                                 scope.launch {
@@ -123,6 +125,7 @@ fun SettingsScreen(
 private fun ColumnScope.SettingsGroups(
     themeRepository: ThemeRepository,
     showSimulation: Boolean,
+    onOpenPlayground: () -> Unit,
     onOpenSimulation: () -> Unit,
     onLanguage: (String) -> Unit
 ) {
@@ -194,6 +197,7 @@ private fun ColumnScope.SettingsGroups(
         }
     }
 
+    FilledTonalButton(onClick = onOpenPlayground) { Text("Playground (experiments)…") }
     if (showSimulation) {
         FilledTonalButton(onClick = onOpenSimulation) { Text("Simulation…") }
     }

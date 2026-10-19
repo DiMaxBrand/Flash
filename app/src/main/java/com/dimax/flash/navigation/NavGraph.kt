@@ -22,6 +22,7 @@ sealed class Screen(val route: String) {
     object Onboarding : Screen("onboarding")
     object Main       : Screen("main")
     object Settings   : Screen("settings")
+    object Playground : Screen("playground")
 }
 
 @Composable
@@ -56,6 +57,13 @@ fun NavGraph(
             )
         }
 
+        composable(Screen.Playground.route) {
+            com.dimax.flash.playground.PlaygroundScreen(
+                nfcManager = nfcManager,
+                onBack = { navController.popBackStack() }
+            )
+        }
+
         composable(Screen.Settings.route) { entry ->
             // The workbench's ViewModel (owned by the Main entry) runs the Simulation from Settings
             val mainEntry = remember(entry) { runCatching { navController.getBackStackEntry(Screen.Main.route) }.getOrNull() }
@@ -70,6 +78,7 @@ fun NavGraph(
                 )
             }
             SettingsScreen(
+                onOpenPlayground = { navController.navigate(Screen.Playground.route) },
                 themeRepository = themeRepository,
                 workbenchViewModel = workbenchViewModel,
                 updates = updateController,

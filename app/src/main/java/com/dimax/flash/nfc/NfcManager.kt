@@ -52,6 +52,33 @@ class NfcManager(private val context: Context) {
     private val _pendingHandshake = MutableStateFlow<PeerHandshake?>(null)
     val pendingHandshake: StateFlow<PeerHandshake?> = _pendingHandshake.asStateFlow()
 
+    // Messages from the playground (Wi-Fi tags, blink targets) are not handshakes: the playground
+    // screen takes them from here.
+    private val _readNdef = MutableStateFlow<NdefMessage?>(null)
+    val readNdef: StateFlow<NdefMessage?> = _readNdef.asStateFlow()
+
+    fun consumeReadNdef() {
+        _readNdef.value = null
+    }
+
+    /** Makes this phone a card that serves [message] (null stops serving). Needs reader mode off. */
+    fun serveNdef(message: NdefMessage?) {
+        HandshakeHceService.ndefMessageBytes = message?.toByteArray()
+    }
+
+    private fun routeRead(message: NdefMessage) {
+        val playground = message.records.any {
+            val type = String(it.type, Charsets.US_ASCII)
+            type == com.dimax.flash.playground.PLAYGROUND_MIME || type == com.dimax.flash.playground.WSC_MIME
+        }
+        if (playground) {
+            log("playground tag read")
+            _readNdef.value = message
+        } else {
+            parseAndEmit(message)
+        }
+    }
+
     fun consumeHandshake() {
         _pendingHandshake.value = null
     }
@@ -202,7 +229,7 @@ class NfcManager(private val context: Context) {
                 have += n
             }
             log("read $length bytes")
-            parseAndEmit(NdefMessage(message))
+            routeRead(NdefMessage(message))
         } catch (e: Exception) {
             fail("read failed: ${e.javaClass.simpleName}: ${e.message ?: "contact lost, hold still"}")
         } finally {
