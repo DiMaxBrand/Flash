@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.delay
@@ -101,8 +102,12 @@ class WorkbenchViewModel(
     private var cameraEnabled = false
 
     init {
-        nfcManager.peerHandshakeFlow
-            .onEach { handshake -> onNfcPeerDetected(handshake) }
+        nfcManager.pendingHandshake
+            .filterNotNull()
+            .onEach { handshake ->
+                onNfcPeerDetected(handshake)
+                nfcManager.consumeHandshake()
+            }
             .launchIn(viewModelScope)
 
         cameraHandshakeManager?.colorHandshakeFlow

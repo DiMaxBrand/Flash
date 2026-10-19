@@ -17,8 +17,8 @@ import android.os.Bundle
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import org.json.JSONObject
@@ -47,8 +47,14 @@ class NfcManager(private val context: Context) {
     val isNfcAvailable: Boolean get() = adapter != null
     val isNfcEnabled: Boolean   get() = adapter?.isEnabled == true
 
-    private val _peerHandshakeFlow = MutableSharedFlow<PeerHandshake>(extraBufferCapacity = 1)
-    val peerHandshakeFlow: SharedFlow<PeerHandshake> = _peerHandshakeFlow.asSharedFlow()
+    // Holds the last handshake until the screen takes it. When the app was closed, the touch starts
+    // MainActivity before any screen exists, so an event that is only emitted could be missed.
+    private val _pendingHandshake = MutableStateFlow<PeerHandshake?>(null)
+    val pendingHandshake: StateFlow<PeerHandshake?> = _pendingHandshake.asStateFlow()
+
+    fun consumeHandshake() {
+        _pendingHandshake.value = null
+    }
 
     /** The last few NFC events, shown on screen so a failed tap can be diagnosed without a computer. */
     private val _status = MutableStateFlow<List<String>>(emptyList())
@@ -291,7 +297,7 @@ class NfcManager(private val context: Context) {
             lastTokenAt = now
 
             log("got ${handshake.ip}:${handshake.port}, ${handshake.fileCount} file(s)")
-            _peerHandshakeFlow.tryEmit(handshake)
+            _pendingHandshake.value = handshake
             return
         }
         fail("message had no Flash handshake")

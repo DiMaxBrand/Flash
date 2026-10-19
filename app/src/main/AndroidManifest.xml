@@ -51,10 +51,6 @@
                 <data android:mimeType="application/vnd.flash.handshake" />
             </intent-filter>
 
-            <!-- NFC tech filter fallback -->
-            <meta-data
-                android:name="android.nfc.action.TECH_DISCOVERED"
-                android:resource="@xml/nfc_tech_filter" />
 
         </activity>
 
