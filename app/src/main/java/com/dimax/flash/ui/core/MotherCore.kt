@@ -18,6 +18,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -67,6 +70,8 @@ fun MotherCore(
     viewfinderContent: (@Composable () -> Unit)? = null,
     /** A photo materializing inside the core (clipped to the blob, above the colour, below the highlights). */
     featuredContent: (@Composable () -> Unit)? = null,
+    /** Sensor state behind the two experimental feature flags (null = both off: the core is unchanged). */
+    motion: CoreMotionState? = null,
     onAnimationComplete: () -> Unit = {}
 ) {
     val viewfinderActive = viewfinderContent != null
@@ -84,6 +89,16 @@ fun MotherCore(
         label         = "timeFraction"
     )
     val time = timeFraction * 1000f
+
+    // Feature flag "core reacts to motion": lean downhill, spring jiggle, rounder blob when shaken
+    val tiltOn = motion != null && motion.tilt
+    val shake = if (tiltOn) motion!!.shake else 0f
+    val motionTx = if (tiltOn) (motion!!.driftX * 10f + motion.jiggleX) * density.density else 0f
+    val motionTy = if (tiltOn) (motion!!.driftY * 10f + motion.jiggleY) * density.density else 0f
+    // Feature flag "3D core": the puck's axes from the phone's orientation (null = the flat 2D core)
+    val frame = if (motion != null && motion.threeD) {
+        motion.rotation?.let { coreFrame(it, motion.standFraction.value, motion.yaw.value) }
+    } else null
 
     val hollowProgress by animateFloatAsState(
         targetValue   = if (isReceiving) progress else 0f,
@@ -131,12 +146,13 @@ fun MotherCore(
             .graphicsLayer {
                 scaleX       = combinedSx
                 scaleY       = combinedSx
-                translationX = combinedTx
-                translationY = combinedTy
+                translationX = combinedTx + motionTx
+                translationY = combinedTy + motionTy
             }
     ) {
         val baseRPx  = with(density) { BASE_RADIUS_DP.dp.toPx() }
-        val noiseRPx = with(density) { intensifiedNoiseOffset.dp.toPx() }
+        // A shaken core is rounder-edged and wobblier; the extra stays inside the box's spare margin
+        val noiseRPx = with(density) { (intensifiedNoiseOffset + shake * 8f).dp.toPx() }
         val blobCx   = with(density) { blobSize.toPx() / 2f }
 
         val blobPath = remember(time, baseRPx, noiseRPx, blobCx) {
@@ -154,6 +170,31 @@ fun MotherCore(
             }
         }
 
+        // Feature flag "3D core": the rounded rim and back of the puck, drawn under the flat core
+        if (frame != null) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                drawCoreBody(blobPath, frame, baseRPx, accentColor, accentAlpha)
+            }
+        }
+        // ...and the flat core itself becomes the puck's front: its whole drawing goes through a
+        // perspective transform (nothing is drawn while the front is turned away or edge-on)
+        val faceMatrix = remember { android.graphics.Matrix() }
+        val faceModifier = if (frame != null) {
+            Modifier.fillMaxSize().drawWithContent {
+                if (coreFaceMatrix(frame, size.width, size.height, baseRPx, faceMatrix)) {
+                    drawIntoCanvas { canvas ->
+                        canvas.nativeCanvas.save()
+                        canvas.nativeCanvas.concat(faceMatrix)
+                        drawContent()
+                        canvas.nativeCanvas.restore()
+                    }
+                }
+            }
+        } else {
+            Modifier.fillMaxSize()
+        }
+
+        Box(modifier = faceModifier) {
         // ── Live camera (receiver scanning) ───────────────────────────────────
         if (viewfinderContent != null) {
             Box(
@@ -193,8 +234,11 @@ fun MotherCore(
         }
 
         // Animated specular wobble — the highlight drifts slowly across the surface
-        val specularShiftX = (sin(time * 0.00063 * PI) * baseRPx * 0.12f).toFloat()
-        val specularShiftY = (cos(time * 0.00047 * PI) * baseRPx * 0.09f).toFloat()
+        // With the motion flag on (and no 3D lighting of its own) the highlight also slides against the tilt
+        val tiltLightX = if (tiltOn && frame == null) -motion!!.driftX * baseRPx * 0.22f else 0f
+        val tiltLightY = if (tiltOn && frame == null) -motion!!.driftY * baseRPx * 0.22f else 0f
+        val specularShiftX = (sin(time * 0.00063 * PI) * baseRPx * 0.12f).toFloat() + tiltLightX
+        val specularShiftY = (cos(time * 0.00047 * PI) * baseRPx * 0.09f).toFloat() + tiltLightY
 
         // Tint (the sender's colour / lock-on colour): flat so the other phone's camera can read its hue
         if (accentColor != null && accentAlpha > 0f) {
@@ -305,6 +349,7 @@ fun MotherCore(
                 style = Stroke(width = 1.5f.dp.toPx(), cap = StrokeCap.Round)
             )
         }
+        } // the flat core (the puck's front when the 3D flag is on)
     }
 }
 

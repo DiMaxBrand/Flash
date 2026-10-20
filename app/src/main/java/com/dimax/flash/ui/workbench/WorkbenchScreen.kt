@@ -102,6 +102,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.dimax.flash.FlashApplication
+import com.dimax.flash.isOn
 import com.dimax.flash.R
 import com.dimax.flash.handshake.MotherCoreViewfinder
 import com.dimax.flash.handshake.ScanCompletePopup
@@ -654,7 +655,14 @@ fun WorkbenchScreen(
 
             val featured = uiState.incoming.firstOrNull { it.index == uiState.featuredIndex && it.stage == Stage.FEATURED }
             val liquidSessionOn = sessionOn || (uiState.incoming.isNotEmpty() && !uiState.legacyReceive)
+            // The two experimental core feature flags (Settings > Feature flags); both off = no sensors, nothing changes
+            val flagOverrides by FlashApplication.instance.featureFlags.overrides.collectAsStateWithLifecycle()
+            val coreMotion = com.dimax.flash.ui.core.rememberCoreMotion(
+                tilt = flagOverrides.isOn(com.dimax.flash.FeatureFlag.CORE_MOTION),
+                threeD = flagOverrides.isOn(com.dimax.flash.FeatureFlag.CORE_3D)
+            )
             MotherCore(
+                motion       = coreMotion,
                 progress     = if (liquidSessionOn) 0f else uiState.transferProgress,
                 isReceiving  = uiState.isReceiving && !liquidSessionOn,
                 accentAlpha  = accentFade,

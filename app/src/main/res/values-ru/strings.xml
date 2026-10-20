@@ -111,4 +111,15 @@
     <string name="updated_sheet_title">Флэш обновлён!</string>
     <string name="updated_sheet_whats_new">Что нового:</string>
     <string name="updated_sheet_dismiss">Закрыть</string>
+
+    <!-- Флаги функций (эксперименты, по умолчанию выключены) -->
+    <string name="feature_flags_title">Флаги функций</string>
+    <string name="feature_flags_disclaimer">Ранние функции, по умолчанию выключены. Могут выглядеть сыро, меняться или исчезнуть.</string>
+    <string name="feature_flag_option_default">По умолчанию</string>
+    <string name="feature_flag_option_on">Вкл.</string>
+    <string name="feature_flag_option_off">Выкл.</string>
+    <string name="feature_flag_core_motion_title">Ядро реагирует на движение</string>
+    <string name="feature_flag_core_motion_description">Главное ядро скатывается вниз, когда вы наклоняете телефон, и трясётся, когда вы его трясёте. Использует датчики движения.</string>
+    <string name="feature_flag_core_3d_title">Объёмное ядро</string>
+    <string name="feature_flag_core_3d_description">Главное ядро становится скруглённым объёмным предметом, который остаётся на месте в пространстве, пока вы поворачиваете телефон. Оно лежит или стоит — как ближе к положению телефона, — переход плавный. Нужен датчик вращения.</string>
 </resources>

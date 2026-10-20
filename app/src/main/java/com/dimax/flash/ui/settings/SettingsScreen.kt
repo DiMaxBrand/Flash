@@ -36,6 +36,8 @@ import androidx.compose.ui.unit.dp
 import androidx.core.os.LocaleListCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.dimax.flash.FeatureFlag
+import com.dimax.flash.FlashApplication
 import com.dimax.flash.R
 import com.dimax.flash.ui.theme.FlashExpressiveTheme
 import com.dimax.flash.ui.theme.HandshakeMode
@@ -197,9 +199,49 @@ private fun ColumnScope.SettingsGroups(
         }
     }
 
+    FeatureFlagGroups()
+
     FilledTonalButton(onClick = onOpenPlayground) { Text("Playground (experiments)…") }
     if (showSimulation) {
         FilledTonalButton(onClick = onOpenSimulation) { Text("Simulation…") }
+    }
+}
+
+/**
+ * Feature flags: one row per [FeatureFlag] entry (the same idea as Impulse's flags screen, which
+ * iterates the registry, so a new flag only needs its entry in FeatureFlags.kt). Default / On / Off.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun FeatureFlagGroups() {
+    val store = remember { FlashApplication.instance.featureFlags }
+    val overrides by store.overrides.collectAsStateWithLifecycle()
+
+    Text(
+        stringResource(R.string.feature_flags_title),
+        style = MaterialTheme.typography.titleLarge,
+        modifier = Modifier.padding(top = 8.dp)
+    )
+    Text(
+        stringResource(R.string.feature_flags_disclaimer),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    FeatureFlag.entries.forEach { flag ->
+        ChoiceGroup(
+            title = stringResource(flag.titleRes),
+            description = stringResource(flag.descriptionRes),
+            items = listOf<Boolean?>(null, true, false),
+            selected = overrides[flag],
+            label = {
+                when (it) {
+                    null -> stringResource(R.string.feature_flag_option_default)
+                    true -> stringResource(R.string.feature_flag_option_on)
+                    false -> stringResource(R.string.feature_flag_option_off)
+                }
+            },
+            onSelect = { store.setOverride(flag, it) }
+        )
     }
 }
 
@@ -211,7 +253,8 @@ private fun <T> ChoiceGroup(
     items: List<T>,
     selected: T,
     label: @Composable (T) -> String,
-    onSelect: (T) -> Unit
+    onSelect: (T) -> Unit,
+    description: String? = null
 ) {
     ExpressiveGroupRow(GroupPosition.SINGLE) {
         Column(
@@ -219,6 +262,13 @@ private fun <T> ChoiceGroup(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text(title, style = MaterialTheme.typography.titleMedium)
+            if (description != null) {
+                Text(
+                    description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween)

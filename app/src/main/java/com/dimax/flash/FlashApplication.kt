@@ -30,6 +30,9 @@ class FlashApplication : Application() {
         )
     }
 
+    // Manual on/off overrides for the experimental feature flags (see FeatureFlags.kt).
+    val featureFlags: FeatureFlagStore by lazy { FeatureFlagStore(this) }
+
     // The in-app updater (check, download, install); shared by Settings and the update sheet.
     val updateController: com.dimax.flash.ui.update.UpdateController by lazy {
         com.dimax.flash.ui.update.UpdateController(this)
