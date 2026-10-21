@@ -5,7 +5,7 @@ import android.view.View
 import androidx.compose.ui.geometry.Offset
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import kotlin.math.max
+import kotlin.math.min
 
 /**
  * Where the front camera hole is, as far as Android tells us. The Mother Core is born at this spot (it starts
@@ -21,7 +21,11 @@ data class CameraCutout(
     val path: android.graphics.Path?,
     /** Where the blob starts from, in window pixels. */
     val center: Offset,
-    /** How big the camera area is: the larger side of its box (or a guess when nothing was reported). */
+    /**
+     * The camera's diameter. The hole is a circle, but some phones report a tall rectangle for it whose WIDTH is
+     * right and whose height is not, so the shorter side of the box is the diameter (a guess when nothing was
+     * reported).
+     */
     val sizePx: Float,
     /** Height of the status bar, in pixels. */
     val topInsetPx: Float,
@@ -53,7 +57,7 @@ fun readCameraCutout(view: View, fallbackSizePx: Float): CameraCutout {
             rects = rects,
             path = path,
             center = Offset(top.exactCenterX(), top.exactCenterY()),
-            sizePx = max(top.width(), top.height()).toFloat(),
+            sizePx = min(top.width(), top.height()).toFloat(),
             topInsetPx = topInset,
             fromSystem = true
         )

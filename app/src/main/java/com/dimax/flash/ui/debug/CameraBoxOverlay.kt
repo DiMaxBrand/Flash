@@ -37,7 +37,8 @@ import kotlinx.coroutines.delay
  *  - magenta box: every cutout area the phone reports
  *  - cyan dashed halo: the same box, larger, so it stands out around a small hole
  *  - yellow outline: the hole's real shape, when the phone gives it (Android 12+)
- *  - green cross and ring: the point the Mother Core is born from
+ *  - green circle: the camera as the app takes it (a circle as wide as the box, since a tall box is still a
+ *    round hole), with a cross at the point the Mother Core is born from
  *  - red dashed circle instead of all of that: the phone reported nothing, so the top centre of the status
  *    bar was assumed (this is also where the core starts in that case)
  * It never catches touches.
@@ -88,9 +89,14 @@ fun CameraBoxOverlay() {
                 )
             }
 
+            // the camera as the app takes it: a CIRCLE whose diameter is the box's shorter side, at the box's centre
+            // (a tall box is still a round hole; this is the size the core is born at)
+            val green = Color(0xFF00E676)
+            drawCircle(green.copy(alpha = 0.35f), radius = c.sizePx / 2f, center = c.center)
+            drawCircle(green, radius = c.sizePx / 2f, center = c.center, style = Stroke(line))
+
             // where the core is born
             val arm = 16.dp.toPx()
-            val green = Color(0xFF00E676)
             drawLine(green, c.center - Offset(arm, 0f), c.center + Offset(arm, 0f), strokeWidth = line)
             drawLine(green, c.center - Offset(0f, arm), c.center + Offset(0f, arm), strokeWidth = line)
             drawCircle(green, radius = 6.dp.toPx(), center = c.center, style = Stroke(line))
@@ -99,6 +105,7 @@ fun CameraBoxOverlay() {
         val first = c.rects.minByOrNull { it.top }
         val label = if (c.fromSystem && first != null) {
             "camera box: reported ${first.width()}x${first.height()} px at (${first.left}, ${first.top})" +
+                " · taken as a circle ${c.sizePx.toInt()} px wide" +
                 " · core starts at (${c.center.x.toInt()}, ${c.center.y.toInt()})" +
                 " · real outline: ${if (c.path != null) "yes" else "not given"}" +
                 " · ${c.rects.size} area(s)"
