@@ -129,7 +129,7 @@ class NfcManager(private val context: Context) {
             put("fileCount", fileCount)
         }.toString()
 
-        val mimeRecord = NdefRecord.createMime("application/vnd.flash.handshake", json.toByteArray(Charsets.UTF_8))
+        val mimeRecord = NdefRecord.createMime(com.dimax.flash.playground.HANDSHAKE_MIME, json.toByteArray(Charsets.UTF_8))
         // Android Application Record: opens Flash if the receiving phone's app is not running
         val aarRecord = NdefRecord.createApplicationRecord(context.packageName)
 

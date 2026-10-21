@@ -17,6 +17,7 @@ import org.json.JSONObject
  * carries an address and a token.
  */
 const val PLAYGROUND_MIME = "application/vnd.flash.playground"
+const val HANDSHAKE_MIME = "application/vnd.flash.handshake"
 const val WSC_MIME = "application/vnd.wfa.wsc"
 const val VCARD_MIME = "text/vcard"
 
@@ -28,9 +29,20 @@ data class ContactCard(val name: String, val phone: String, val email: String)
 
 object PlaygroundNdef {
 
-    /** True for the records the playground reads itself; anything else goes to the handshake parser. */
-    fun isPlayground(message: NdefMessage): Boolean = message.records.any { record ->
-        record.toUri() != null || String(record.type, Charsets.US_ASCII) in setOf(PLAYGROUND_MIME, WSC_MIME, VCARD_MIME)
+    /**
+     * True for the records the playground reads itself; anything else goes to the handshake parser.
+     * A real handshake is never a playground tag, even though it carries an Android Application Record:
+     * `NdefRecord.toUri()` turns an EXTERNAL_TYPE record (the AAR) into a `vnd.android.nfc://ext/...` URI, so
+     * a bare `toUri() != null` check sent every handshake here from beta.3 on ("playground tag read").
+     * Only a real URI record (well-known "U" or an absolute URI) counts as a link tag.
+     */
+    fun isPlayground(message: NdefMessage): Boolean {
+        if (message.records.any { String(it.type, Charsets.US_ASCII) == HANDSHAKE_MIME }) return false
+        return message.records.any { record ->
+            val isLink = record.tnf == NdefRecord.TNF_ABSOLUTE_URI ||
+                (record.tnf == NdefRecord.TNF_WELL_KNOWN && record.type.contentEquals(NdefRecord.RTD_URI))
+            isLink || String(record.type, Charsets.US_ASCII) in setOf(PLAYGROUND_MIME, WSC_MIME, VCARD_MIME)
+        }
     }
 
     /** Wi-Fi: one record holding a credential (SSID, WPA2 key), as Android and other readers expect. */
