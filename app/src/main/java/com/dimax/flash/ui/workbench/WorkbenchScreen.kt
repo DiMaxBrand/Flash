@@ -368,6 +368,11 @@ fun WorkbenchScreen(
         label = "accent_fade"
     )
 
+    // While leaving, the layer behind every screen fades out too (see MainActivity), so the window shows what
+    // was behind the app. Leaving the screen any other way puts it back.
+    LaunchedEffect(uiState.shouldExit) { app.revealBehindApp.value = uiState.shouldExit }
+    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { app.revealBehindApp.value = false } }
+
     val screenExitY = remember { Animatable(0f) }
     var screenExitStarted by remember { mutableStateOf(false) }
     LaunchedEffect(uiState.shouldExit) {

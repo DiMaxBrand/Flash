@@ -8,8 +8,16 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
 import androidx.navigation.compose.rememberNavController
 import com.dimax.flash.ui.theme.ThemeMode
 import com.dimax.flash.navigation.NavGraph
@@ -40,15 +48,30 @@ class MainActivity : ComponentActivity() {
             val navController = rememberNavController()
 
             FlashTheme(themeMode = themeMode) {
-                NavGraph(
-                    navController = navController,
-                    startDestination = if (onboardingShown) Screen.Main.route else Screen.Onboarding.route,
-                    themeRepository = app.themeRepository,
-                    transferRepository = app.transferRepository,
-                    nfcManager = nfcManager,
-                    cameraHandshakeManager = app.cameraHandshakeManager,
-                    updateController = app.updateController
+                // The window is translucent (see the theme), so something opaque must sit behind the screens:
+                // navigation crossfades would otherwise show what is behind the app. It fades out only while
+                // the app is leaving, so the exit animation reveals the home screen or the app below.
+                val revealBehind by app.revealBehindApp
+                val rootAlpha by animateFloatAsState(
+                    targetValue = if (revealBehind) 0f else 1f,
+                    animationSpec = tween(400, easing = FastOutSlowInEasing),
+                    label = "root_background"
                 )
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.background.copy(alpha = rootAlpha))
+                ) {
+                    NavGraph(
+                        navController = navController,
+                        startDestination = if (onboardingShown) Screen.Main.route else Screen.Onboarding.route,
+                        themeRepository = app.themeRepository,
+                        transferRepository = app.transferRepository,
+                        nfcManager = nfcManager,
+                        cameraHandshakeManager = app.cameraHandshakeManager,
+                        updateController = app.updateController
+                    )
+                }
                 // The update bottom sheet appears over whichever screen is open
                 UpdateSheetHost(app.updateController, themeMode)
             }

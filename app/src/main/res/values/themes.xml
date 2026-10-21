@@ -3,6 +3,10 @@
     <!-- Fallback XML theme for splash/launch window only. Compose handles all real UI theming. -->
     <style name="Theme.Flash" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@android:color/black</item>
+        <!-- The exit animation fades the screen out to show what was behind the app. Without this the window
+             is opaque, so its transparent pixels show as black (recent apps shows them as transparent). The
+             screens paint their own opaque background (see MainActivity), so nothing else changes. -->
+        <item name="android:windowIsTranslucent">true</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <!-- The update icons (copied from Impulse) tint themselves with this AppCompat attribute -->

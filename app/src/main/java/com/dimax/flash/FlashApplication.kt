@@ -30,6 +30,10 @@ class FlashApplication : Application() {
         )
     }
 
+    // True while the app is leaving: the opaque layer behind every screen (MainActivity) fades out so the
+    // exit animation shows what was behind the app instead of black.
+    val revealBehindApp = androidx.compose.runtime.mutableStateOf(false)
+
     // Manual on/off overrides for the experimental feature flags (see FeatureFlags.kt).
     val featureFlags: FeatureFlagStore by lazy { FeatureFlagStore(this) }
 

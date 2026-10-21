@@ -8,8 +8,8 @@ plugins {
 //   appVersionName: X.Y.Z for a stable release, X.Y.Z-beta.N for a beta. This string IS the GitHub
 //                   release tag, and the in-app updater compares it, so it must be valid semver.
 //   appVersionCode: must increase on every build that is published.
-val appVersionCode = 65
-val appVersionName = "1.0.1-beta.7"
+val appVersionCode = 66
+val appVersionName = "1.0.1-beta.8"
 
 android {
     namespace = "com.dimax.flash"
