@@ -459,7 +459,7 @@ fun WorkbenchScreen(
     val showHints by app.themeRepository.showHints.collectAsStateWithLifecycle(false)
     val hintBusy = uiState.isReceiving || uiState.incoming.isNotEmpty() || uiState.transferProgress > 0f
     val hintKind: HintKind? = when {
-        !showHints || hintBusy -> null
+        !showHints || hintBusy || uiState.shouldExit -> null
         uiState.selectedPhotos.isEmpty() && uiState.cameraHandshakeEnabled &&
             uiState.colorDetectionState == ColorDetectionState.Detecting -> HintKind.CAMERA_SCAN
         nfcOn && nfcSupported && !uiState.nfcOff ->
@@ -504,6 +504,14 @@ fun WorkbenchScreen(
         targetValue = if (uiState.shouldExit) 0f else 1f,
         animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing),
         label = "bg_alpha"
+    )
+
+    // The status boxes and notices are drawn outside the sliding content, so on the way out they stayed on
+    // screen over the home screen until the activity closed; they fade out as the exit starts instead.
+    val chromeAlpha by animateFloatAsState(
+        targetValue = if (uiState.shouldExit) 0f else 1f,
+        animationSpec = tween(durationMillis = 250),
+        label = "chrome_alpha"
     )
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -785,6 +793,7 @@ fun WorkbenchScreen(
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
+                .graphicsLayer { alpha = chromeAlpha }
                 .padding(bottom = 160.dp, start = 16.dp, end = 16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
             horizontalAlignment = Alignment.CenterHorizontally
