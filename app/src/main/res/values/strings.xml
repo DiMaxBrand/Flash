@@ -119,6 +119,8 @@
     <string name="feature_flag_option_off">Off</string>
     <string name="feature_flag_core_motion_title">Core reacts to motion</string>
     <string name="feature_flag_core_motion_description">The Mother Core leans downhill when you tilt the phone and wobbles when you shake it. Uses the motion sensors.</string>
+    <string name="feature_flag_camera_box_title">Show the camera box</string>
+    <string name="feature_flag_camera_box_description">Draws where the app thinks your camera hole is: a magenta box with a cyan halo, the real outline in yellow when the phone gives it, and a green cross where the core is born. If it is not on the camera, the core starts from the wrong place.</string>
     <string name="feature_flag_core_3d_title">3D core</string>
     <string name="feature_flag_core_3d_description">The Mother Core becomes a rounded 3D object that stays fixed in space as you turn the phone. It lies flat or stands upright, whichever is closer to how you hold the phone, and the switch is animated. Needs a rotation sensor.</string>
 

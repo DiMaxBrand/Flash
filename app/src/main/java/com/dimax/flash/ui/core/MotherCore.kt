@@ -59,6 +59,12 @@ private const val CONTROL_POINTS  = 16
 private const val BASE_RADIUS_DP  = 60f
 private const val NOISE_OFFSET_DP = 20f
 
+/** Ease in and out, clamped to 0..1. */
+private fun smooth01(x: Float): Float {
+    val t = x.coerceIn(0f, 1f)
+    return t * t * (3f - 2f * t)
+}
+
 @Composable
 fun MotherCore(
     modifier: Modifier = Modifier,
@@ -67,6 +73,10 @@ fun MotherCore(
     crystallizedBitmap: ImageBitmap? = null,
     shouldExit: Boolean = false,
     cutoutOffset: Offset = Offset.Zero,
+    /** How big the camera hole is; the core is born at about this size. 0 = unknown. */
+    cutoutSizePx: Float = 0f,
+    /** False until the camera position is known; the core stays hidden (it must not start from a guess). */
+    spawnReady: Boolean = true,
     backdrop: Backdrop? = null,
     accentColor: Color? = null,
     accentAlpha: Float = 0.80f,
@@ -103,14 +113,12 @@ fun MotherCore(
         label         = "hollow"
     )
 
-    val spawnScale = remember { Animatable(0f) }
-    val spawnTx    = remember { Animatable(cutoutOffset.x) }
-    val spawnTy    = remember { Animatable(cutoutOffset.y) }
-    LaunchedEffect(Unit) {
-        val spec = tween<Float>(3000, easing = FastOutSlowInEasing)
-        launch { spawnScale.animateTo(1f, spec) }
-        launch { spawnTx.animateTo(0f, spec) }
-        launch { spawnTy.animateTo(0f, spec) }
+    // The birth: the core starts as a BLACK blob at the camera hole (the same black as the hole), swells there,
+    // then drifts to its place while the black turns into glass. One progress value, 0..1 over 3.2 s. It waits
+    // for the camera position (spawnReady): starting before it was known made the blob come from a wrong spot.
+    val spawn = remember { Animatable(0f) }
+    LaunchedEffect(spawnReady) {
+        if (spawnReady) spawn.animateTo(1f, tween(3200, easing = LinearEasing))
     }
 
     val exitScale = remember { Animatable(1f) }
@@ -133,9 +141,23 @@ fun MotherCore(
     val transferIntensity = (progress * 0.5f)
     val intensifiedNoiseOffset = NOISE_OFFSET_DP + (5f * transferIntensity)
     val blobSize   = (BASE_RADIUS_DP * 2 + intensifiedNoiseOffset * 2 + 20f).dp
-    val combinedSx = spawnScale.value * exitScale.value
-    val combinedTx = spawnTx.value   + exitTx.value
-    val combinedTy = spawnTy.value   + exitTy.value
+    // Birth, in three overlapping parts: swell at the camera (fast, then settling), drift to the place (starts
+    // part-way through the swell), and the black fading into glass (once it is mostly grown). Leaving does the
+    // reverse of the last part: the core goes black again as it is swallowed back into the camera.
+    val p = spawn.value
+    val blobPx = with(density) { blobSize.toPx() }
+    val startScale = if (cutoutSizePx > 0f) (cutoutSizePx / blobPx).coerceIn(0.05f, 0.35f) else 0.1f
+    val grow = 1f - (1f - (p / 0.5f).coerceIn(0f, 1f)).let { it * it * it }
+    val spawnScale = if (spawnReady) startScale + (1f - startScale) * grow else 0f
+    val move = smooth01((p - 0.35f) / 0.65f)
+    val spawnTx = cutoutOffset.x * (1f - move)
+    val spawnTy = cutoutOffset.y * (1f - move)
+    val spawnBlack = 1f - smooth01((p - 0.55f) / 0.4f)
+    val exitBlack = smooth01(((1f - exitScale.value) - 0.4f) / 0.6f)
+    val blackAlpha = if (spawnReady) maxOf(spawnBlack, exitBlack) else 0f
+    val combinedSx = spawnScale * exitScale.value
+    val combinedTx = spawnTx + exitTx.value
+    val combinedTy = spawnTy + exitTy.value
 
     Box(
         modifier = modifier
@@ -148,12 +170,17 @@ fun MotherCore(
             }
     ) {
         val baseRPx  = with(density) { BASE_RADIUS_DP.dp.toPx() }
-        // A shaken core is rounder-edged and wobblier; the extra stays inside the box's spare margin
-        val noiseRPx = with(density) { (intensifiedNoiseOffset + shake * 8f).dp.toPx() }
+        // A shaken core is rounder-edged and wobblier, and so is a newborn one; the extra stays inside the box's
+        // spare margin
+        val spawnWobble = (1f - smooth01(p)) * 8f
+        val noiseRPx = with(density) { (intensifiedNoiseOffset + minOf(8f, shake * 8f + spawnWobble)).dp.toPx() }
         val blobCx   = with(density) { blobSize.toPx() / 2f }
+        // The noise flows several times faster at birth and eases back to its normal pace. It is a smooth extra
+        // time offset that ends as a constant, so there is no jump anywhere.
+        val noiseTimeD = timeD + 1500.0 * (1.0 - (1.0 - p.toDouble()).let { it * it * it })
 
-        val blobPath = remember(time, baseRPx, noiseRPx, blobCx) {
-            buildBlobPath(blobCx, blobCx, baseRPx, noiseRPx, timeD)
+        val blobPath = remember(noiseTimeD, baseRPx, noiseRPx, blobCx) {
+            buildBlobPath(blobCx, blobCx, baseRPx, noiseRPx, noiseTimeD)
         }
 
         // Everything is clipped to the morphing blob itself: no static circle anywhere.
@@ -377,6 +404,12 @@ fun MotherCore(
                 style = Stroke(width = 1.5f.dp.toPx(), cap = StrokeCap.Round)
             )
         }
+            // The birth colour: black like the camera hole, over everything, fading away into the glass
+            if (blackAlpha > 0.003f) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    drawPath(blobPath, Color.Black.copy(alpha = blackAlpha))
+                }
+            }
         } // the flat core (the puck's front when the 3D flag is on)
     }
 }

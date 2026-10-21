@@ -119,6 +119,8 @@
     <string name="feature_flag_option_off">Выкл.</string>
     <string name="feature_flag_core_motion_title">Ядро реагирует на движение</string>
     <string name="feature_flag_core_motion_description">Главное ядро скатывается вниз, когда вы наклоняете телефон, и трясётся, когда вы его трясёте. Использует датчики движения.</string>
+    <string name="feature_flag_camera_box_title">Показывать рамку камеры</string>
+    <string name="feature_flag_camera_box_description">Рисует, где приложение считает вырез камеры: пурпурная рамка с голубым ореолом, жёлтый контур (если телефон его сообщает) и зелёный крест — откуда рождается ядро. Если рамка не на камере, ядро стартует не оттуда.</string>
     <string name="feature_flag_core_3d_title">Объёмное ядро</string>
     <string name="feature_flag_core_3d_description">Главное ядро становится скруглённым объёмным предметом, который остаётся на месте в пространстве, пока вы поворачиваете телефон. Оно лежит или стоит — как ближе к положению телефона, — переход плавный. Нужен датчик вращения.</string>
 

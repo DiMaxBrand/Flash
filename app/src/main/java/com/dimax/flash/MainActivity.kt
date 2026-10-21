@@ -19,6 +19,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import kotlinx.coroutines.flow.first
+import com.dimax.flash.isOn
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.rememberNavController
 import com.dimax.flash.ui.theme.ThemeMode
@@ -80,6 +81,9 @@ class MainActivity : ComponentActivity() {
                             updateController = app.updateController
                         )
                     }
+                    // Feature flag "Show the camera box": where the app thinks the camera hole is, over everything
+                    val flags by app.featureFlags.overrides.collectAsState()
+                    if (flags.isOn(FeatureFlag.CAMERA_BOX)) com.dimax.flash.ui.debug.CameraBoxOverlay()
                 }
                 // The update bottom sheet appears over whichever screen is open
                 UpdateSheetHost(app.updateController, themeMode)

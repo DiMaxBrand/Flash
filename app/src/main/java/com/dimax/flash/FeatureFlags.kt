@@ -27,6 +27,14 @@ enum class FeatureFlag(
         defaultValue = false
     ),
 
+    /** Draws where the app thinks the front camera is (the core is born from there), to check it sees it right. */
+    CAMERA_BOX(
+        key = "camera_box",
+        titleRes = R.string.feature_flag_camera_box_title,
+        descriptionRes = R.string.feature_flag_camera_box_description,
+        defaultValue = false
+    ),
+
     /** The Mother Core is a rounded 3D object fixed in space; it lies flat or stands upright. */
     CORE_3D(
         key = "core_3d",

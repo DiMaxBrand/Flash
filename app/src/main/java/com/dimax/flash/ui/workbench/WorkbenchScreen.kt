@@ -103,6 +103,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.dimax.flash.FlashApplication
 import com.dimax.flash.isOn
+import androidx.compose.runtime.produceState
 import com.dimax.flash.ui.hints.HintKind
 import com.dimax.flash.ui.hints.HintsOverlay
 import com.dimax.flash.R
@@ -304,17 +305,19 @@ fun WorkbenchScreen(
     val statusBarTopPx = WindowInsets.statusBars.getTop(density).toFloat()
     val blobSizePx     = with(density) { BLOB_SIZE_DP.toPx() }
 
-    val cutoutOffset: Offset = remember(view, statusBarTopPx, blobSizePx) {
-        val cutoutCenterInWindow = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            val rect = view.rootWindowInsets?.displayCutout?.boundingRects?.firstOrNull()
-            if (rect != null) Offset(rect.centerX().toFloat(), rect.centerY().toFloat())
-            else Offset(view.width / 2f, statusBarTopPx / 2f)
-        } else {
-            Offset(view.width / 2f, statusBarTopPx / 2f)
-        }
-        val cutoutLocal = cutoutCenterInWindow - Offset(0f, statusBarTopPx)
-        val blobCenter  = Offset(view.width / 2f, blobSizePx / 2f)
-        cutoutLocal - blobCenter
+    // The camera hole is read only once the window is attached and laid out: before that the phone reports no
+    // cutout and the view has no width, so the old code (which read it at the first frame and kept it) made the
+    // core start from the top centre or the top left instead of from the camera. The core waits for this.
+    val fallbackCameraPx = with(density) { 28.dp.toPx() }
+    val cameraCutout by produceState<com.dimax.flash.util.CameraCutout?>(initialValue = null, view) {
+        while (!com.dimax.flash.util.isReadable(view)) delay(16)
+        delay(32) // let the insets settle (the status bar height comes with them)
+        value = com.dimax.flash.util.readCameraCutout(view, fallbackCameraPx)
+    }
+    val cutoutOffset: Offset = remember(cameraCutout, blobSizePx) {
+        val camera = cameraCutout
+        if (camera == null) Offset.Zero
+        else (camera.center - Offset(0f, camera.topInsetPx)) - Offset(view.width / 2f, blobSizePx / 2f)
     }
 
     var coreCenter   by remember { mutableStateOf(Offset.Zero) }
@@ -747,6 +750,8 @@ fun WorkbenchScreen(
                 featuredContent = featured?.let { f -> { LiquidFeatured(f, viewModel) } },
                 shouldExit   = uiState.shouldExit,
                 cutoutOffset = cutoutOffset,
+                cutoutSizePx = cameraCutout?.sizePx ?: 0f,
+                spawnReady   = cameraCutout != null,
                 backdrop     = backdrop,
                 accentColor  = lockedAccent,
                 viewfinderContent = viewfinderContent,
