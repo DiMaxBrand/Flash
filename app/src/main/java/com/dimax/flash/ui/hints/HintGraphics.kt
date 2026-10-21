@@ -23,8 +23,8 @@ import com.dimax.flash.ui.core.rememberContinuousTime
 import com.dimax.flash.ui.theme.OceanAqua
 import kotlin.math.PI
 import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.sin
-import kotlin.math.sqrt
 
 /*
  * Small animated drawings for the welcome screen and the hints. Their motion runs on the continuous clock
@@ -32,10 +32,11 @@ import kotlin.math.sqrt
  */
 
 private val PhoneLight = Color(0xFF4B6169)
-private val PhoneBody = Color(0xFF3A4E56)
-private val PhoneEdge = Color(0xFF162024)
+private val PhoneBody = Color(0xFF34444B)
+private val PhoneEdge = Color(0xFF151D21)
 private val PhoneGlass = Color(0xFF7FA6B4)
 private val LensRing = Color(0xFF8FA3AA)
+private val LensInside = Color(0xFF0B1113)
 
 private fun smoothstep(x: Float): Float {
     val t = x.coerceIn(0f, 1f)
@@ -75,55 +76,111 @@ private class Projector(
     val viewer get() = floatArrayOf(0f, 0f, camera)
 }
 
+/** The corners of a rounded rectangle in a phone's plane (y up the phone, z across it), going once round. */
+private fun roundedRect(y0: Float, y1: Float, z0: Float, z1: Float, r: Float, steps: Int = 6): List<FloatArray> {
+    val points = ArrayList<FloatArray>()
+    // each corner: its centre and where its quarter turn starts (the angle runs from +y towards +z)
+    val corners = arrayOf(
+        floatArrayOf(y1 - r, z1 - r, 0f),
+        floatArrayOf(y0 + r, z1 - r, 90f),
+        floatArrayOf(y0 + r, z0 + r, 180f),
+        floatArrayOf(y1 - r, z0 + r, 270f)
+    )
+    for (c in corners) {
+        for (k in 0..steps) {
+            val a = Math.toRadians((c[2] + 90f * k / steps).toDouble())
+            points.add(floatArrayOf(c[0] + r * cos(a).toFloat(), c[1] + r * sin(a).toFloat()))
+        }
+    }
+    return points
+}
+
+private fun circlePoints(y: Float, z: Float, r: Float, n: Int = 20): List<FloatArray> =
+    List(n) { k ->
+        val a = 2.0 * PI * k / n
+        floatArrayOf(y + r * cos(a).toFloat(), z + r * sin(a).toFloat())
+    }
+
 /**
- * A box (a phone is a thick slab) drawn face by face: only the faces turned towards the viewer, shaded by a
- * fixed light, with a same-coloured round-joined outline so the corners look soft.
+ * One flat face with an outward normal, drawn only if it faces the viewer, shaded by a fixed light, with a
+ * same-coloured round-joined outline so edges look soft.
  */
-private fun DrawScope.drawBox(
+private fun DrawScope.drawFace(
     p: Projector,
-    x0: Float, x1: Float, y0: Float, y1: Float, z0: Float, z1: Float,
+    normal: FloatArray,
+    corners: List<FloatArray>,
     color: Color,
     outline: Float
 ) {
-    // each face: outward normal and its four corners
-    val faces = arrayOf(
-        floatArrayOf(1f, 0f, 0f) to arrayOf(floatArrayOf(x1, y0, z0), floatArrayOf(x1, y1, z0), floatArrayOf(x1, y1, z1), floatArrayOf(x1, y0, z1)),
-        floatArrayOf(-1f, 0f, 0f) to arrayOf(floatArrayOf(x0, y0, z0), floatArrayOf(x0, y0, z1), floatArrayOf(x0, y1, z1), floatArrayOf(x0, y1, z0)),
-        floatArrayOf(0f, 1f, 0f) to arrayOf(floatArrayOf(x0, y1, z0), floatArrayOf(x0, y1, z1), floatArrayOf(x1, y1, z1), floatArrayOf(x1, y1, z0)),
-        floatArrayOf(0f, -1f, 0f) to arrayOf(floatArrayOf(x0, y0, z0), floatArrayOf(x1, y0, z0), floatArrayOf(x1, y0, z1), floatArrayOf(x0, y0, z1)),
-        floatArrayOf(0f, 0f, 1f) to arrayOf(floatArrayOf(x0, y0, z1), floatArrayOf(x1, y0, z1), floatArrayOf(x1, y1, z1), floatArrayOf(x0, y1, z1)),
-        floatArrayOf(0f, 0f, -1f) to arrayOf(floatArrayOf(x0, y0, z0), floatArrayOf(x0, y1, z0), floatArrayOf(x1, y1, z0), floatArrayOf(x1, y0, z0))
-    )
-    // light from above, the viewer's side and the left
-    val lightLength = sqrt(0.4f * 0.4f + 0.8f * 0.8f + 0.5f * 0.5f)
-    val lx = -0.4f / lightLength
-    val ly = 0.8f / lightLength
-    val lz = 0.5f / lightLength
-    val path = Path()
-    for ((normal, corners) in faces) {
-        val n = p.rotate(normal[0], normal[1], normal[2])
-        val rotated = corners.map { p.rotate(it[0], it[1], it[2]) }
-        val cxr = rotated.sumOf { it[0].toDouble() }.toFloat() / 4f
-        val cyr = rotated.sumOf { it[1].toDouble() }.toFloat() / 4f
-        val czr = rotated.sumOf { it[2].toDouble() }.toFloat() / 4f
-        val toViewer = floatArrayOf(-cxr, -cyr, p.viewer[2] - czr)
-        if (n[0] * toViewer[0] + n[1] * toViewer[1] + n[2] * toViewer[2] <= 0f) continue
-        val diffuse = (n[0] * lx + n[1] * ly + n[2] * lz).coerceAtLeast(0f)
-        val shaded = lerp(Color.Black, color, 0.35f + 0.65f * diffuse)
-        path.reset()
-        rotated.forEachIndexed { i, r ->
-            val s = p.toScreen(r)
-            if (i == 0) path.moveTo(s.x, s.y) else path.lineTo(s.x, s.y)
-        }
-        path.close()
-        drawPath(path, shaded)
-        drawPath(path, shaded, style = Stroke(width = outline, join = StrokeJoin.Round))
+    val n = p.rotate(normal[0], normal[1], normal[2])
+    val rotated = corners.map { p.rotate(it[0], it[1], it[2]) }
+    var cx = 0f
+    var cy = 0f
+    var cz = 0f
+    for (r in rotated) {
+        cx += r[0]
+        cy += r[1]
+        cz += r[2]
     }
+    cx /= rotated.size
+    cy /= rotated.size
+    cz /= rotated.size
+    if (n[0] * -cx + n[1] * -cy + n[2] * (p.viewer[2] - cz) <= 0f) return
+    // light from above, the viewer's side and the left
+    val lightLength = kotlin.math.sqrt(0.4f * 0.4f + 0.8f * 0.8f + 0.5f * 0.5f)
+    val diffuse = (n[0] * -0.4f / lightLength + n[1] * 0.8f / lightLength + n[2] * 0.5f / lightLength).coerceAtLeast(0f)
+    val shaded = lerp(Color.Black, color, 0.35f + 0.65f * diffuse)
+    val path = Path()
+    rotated.forEachIndexed { i, r ->
+        val s = p.toScreen(r)
+        if (i == 0) path.moveTo(s.x, s.y) else path.lineTo(s.x, s.y)
+    }
+    path.close()
+    drawPath(path, shaded)
+    drawPath(path, shaded, style = Stroke(width = outline, join = StrokeJoin.Round))
+}
+
+/** A thin plate: [outline] (in the y-z plane) extruded along x from [x0] to [x1], so a rounded phone, not a box. */
+private fun DrawScope.drawPlate(
+    p: Projector,
+    outline: List<FloatArray>,
+    x0: Float,
+    x1: Float,
+    color: Color,
+    lineWidth: Float
+) {
+    var cy = 0f
+    var cz = 0f
+    for (pt in outline) {
+        cy += pt[0]
+        cz += pt[1]
+    }
+    cy /= outline.size
+    cz /= outline.size
+    for (i in outline.indices) {
+        val a = outline[i]
+        val b = outline[(i + 1) % outline.size]
+        val ny = (a[0] + b[0]) / 2f - cy
+        val nz = (a[1] + b[1]) / 2f - cz
+        val length = hypot(ny, nz).coerceAtLeast(1e-4f)
+        drawFace(
+            p, floatArrayOf(0f, ny / length, nz / length),
+            listOf(
+                floatArrayOf(x0, a[0], a[1]), floatArrayOf(x1, a[0], a[1]),
+                floatArrayOf(x1, b[0], b[1]), floatArrayOf(x0, b[0], b[1])
+            ),
+            color, lineWidth
+        )
+    }
+    drawFace(p, floatArrayOf(-1f, 0f, 0f), outline.map { floatArrayOf(x0, it[0], it[1]) }, color, lineWidth)
+    drawFace(p, floatArrayOf(1f, 0f, 0f), outline.map { floatArrayOf(x1, it[0], it[1]) }, color, lineWidth)
 }
 
 /**
- * Two phones as thick slabs, seen from slightly above and the side, with their BACKS facing each other. Each
- * back has a camera bump; they close until the bumps meet in the middle, and NFC waves spread out from there.
+ * Two phones, thin with rounded corners, seen from slightly above and the side, with their BACKS facing each
+ * other. The left phone shows its back: the camera island with two lenses. The right one shows its screen
+ * side (its own back and island are on the hidden side). They close until the islands meet in the middle,
+ * and NFC waves spread out from there. (The first versions drew thick boxes, which looked like bricks.)
  */
 @Composable
 fun TapPhonesIllustration(modifier: Modifier = Modifier) {
@@ -131,47 +188,48 @@ fun TapPhonesIllustration(modifier: Modifier = Modifier) {
     Canvas(modifier.size(160.dp, 112.dp)) {
         // 0 = apart, 1 = touching; smooth, and it rests a moment at each end (3.6 s round trip)
         val together = smoothstep(((0.5 - 0.5 * cos(2 * PI * seconds / 3.6)).toFloat() - 0.1f) / 0.8f)
-        val unit = size.height / 118f
+        val unit = size.height / 100f
         val projector = Projector(
             cx = size.width / 2f,
             cy = size.height * 0.53f,
             scale = unit,
-            yawDegrees = -32f,
-            pitchDegrees = 18f,
+            yawDegrees = -24f,
+            pitchDegrees = 14f,
             camera = 380f
         )
 
-        val thickness = 9f
-        val height = 60f
-        val width = 30f
-        val bump = 3.6f
-        val glass = 1.4f
+        val thickness = 4.2f
+        val halfH = 32f
+        val halfW = 15.5f
+        val bump = 1.5f
+        val glass = 0.9f
         val gap = 34f * (1f - together)        // how far each phone is from touching
-        val halfH = height / 2f
-        val halfW = width / 2f
-        // the camera bump sits near the top of the back, on one side
-        val bumpY0 = halfH - 17f
-        val bumpY1 = halfH - 5f
-        val bumpZ0 = -halfW + 3f
-        val bumpZ1 = -halfW + 17f
-        val outline = 1.2f * unit
+        val line = 1.0f * unit
 
-        // Left phone: its back faces right. The far phone is drawn first; its bump is on the visible side.
-        val leftInner = -bump - gap
-        drawBox(projector, leftInner - thickness, leftInner, -halfH, halfH, -halfW, halfW, PhoneBody, outline)
-        drawBox(projector, leftInner - thickness - glass, leftInner - thickness, -halfH, halfH, -halfW, halfW, PhoneGlass, outline)
-        drawBox(projector, leftInner, leftInner + bump, bumpY0, bumpY1, bumpZ0, bumpZ1, PhoneEdge, outline)
+        val body = roundedRect(-halfH, halfH, -halfW, halfW, 6.5f)
+        val island = roundedRect(halfH - 19f, halfH - 5f, -halfW + 3.5f, -halfW + 17f, 3.6f)
+        val lensZ = -halfW + 10.2f
 
-        // Right phone: its back faces left. Its bump is on the side that is hidden, so it goes under the body.
-        val rightInner = bump + gap
-        drawBox(projector, rightInner - bump, rightInner, bumpY0, bumpY1, bumpZ0, bumpZ1, PhoneEdge, outline)
-        drawBox(projector, rightInner, rightInner + thickness, -halfH, halfH, -halfW, halfW, PhoneBody, outline)
-        drawBox(projector, rightInner + thickness, rightInner + thickness + glass, -halfH, halfH, -halfW, halfW, PhoneGlass, outline)
+        // Left phone: its back faces right, with the island and two lenses on it
+        val leftBack = -bump - gap
+        drawPlate(projector, body, leftBack - thickness, leftBack, PhoneBody, line)
+        drawPlate(projector, body, leftBack - thickness - glass, leftBack - thickness, PhoneGlass, line)
+        drawPlate(projector, island, leftBack, leftBack + bump, PhoneEdge, line)
+        for (lensY in floatArrayOf(halfH - 8.8f, halfH - 15.2f)) {
+            drawFace(projector, floatArrayOf(1f, 0f, 0f), circlePoints(lensY, lensZ, 3.0f).map { floatArrayOf(leftBack + bump + 0.05f, it[0], it[1]) }, LensRing, line * 0.6f)
+            drawFace(projector, floatArrayOf(1f, 0f, 0f), circlePoints(lensY, lensZ, 1.9f).map { floatArrayOf(leftBack + bump + 0.1f, it[0], it[1]) }, LensInside, line * 0.3f)
+        }
 
-        // NFC waves from where the bumps meet
+        // Right phone: its back faces left; the island is on the side we cannot see, so the body covers it
+        val rightBack = bump + gap
+        drawPlate(projector, island, rightBack - bump, rightBack, PhoneEdge, line)
+        drawPlate(projector, body, rightBack, rightBack + thickness, PhoneBody, line)
+        drawPlate(projector, body, rightBack + thickness, rightBack + thickness + glass, PhoneGlass, line)
+
+        // NFC waves from where the islands meet
         val waves = ((together - 0.75f) / 0.25f).coerceIn(0f, 1f)
         if (waves > 0f) {
-            val centre = projector.toScreen(projector.rotate(0f, (bumpY0 + bumpY1) / 2f, (bumpZ0 + bumpZ1) / 2f))
+            val centre = projector.toScreen(projector.rotate(0f, halfH - 12f, lensZ))
             val phase = (seconds * 0.9) % 1.0
             for (i in 0..2) {
                 val t = ((phase + i / 3.0) % 1.0).toFloat()
