@@ -97,7 +97,7 @@ jobs:
 
       - name: Build APK (signed with the release key)
         if: steps.key.outputs.present == 'true'
-        run: ./gradlew assembleDebug --no-daemon
+        run: ./gradlew assembleRelease --no-daemon
 
       - name: Create Release & upload APK
         if: steps.key.outputs.present == 'true'
@@ -107,5 +107,5 @@ jobs:
           name: ${{ steps.version.outputs.name }}
           body: ${{ steps.version.outputs.body }}
           prerelease: ${{ steps.version.outputs.prerelease }}
-          files: app/build/outputs/apk/debug/app-debug.apk
+          files: app/build/outputs/apk/release/app-release.apk
           make_latest: ${{ steps.version.outputs.prerelease == 'false' }}

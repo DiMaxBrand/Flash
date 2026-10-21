@@ -22,3 +22,15 @@
 
 # Compose Preview
 -keep class androidx.compose.ui.tooling.preview.** { *; }
+
+# Logback / SLF4J (logback-android finds its appenders and layouts by reflection)
+-keep class ch.qos.logback.** { *; }
+-dontwarn ch.qos.logback.**
+-keep class org.slf4j.** { *; }
+-dontwarn org.slf4j.**
+
+# Ktor server/client engines are looked up by service loader
+-keep class kotlin.reflect.jvm.internal.** { *; }
+-dontwarn kotlin.reflect.jvm.internal.**
+-dontwarn java.lang.management.**
+-dontwarn javax.naming.**

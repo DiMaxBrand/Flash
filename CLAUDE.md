@@ -554,3 +554,7 @@ The exit animation (the core shrinks into the camera cut-out, the screen fades) 
 ## Hotspot button (1.0.1-beta.15)
 
 The "No Wi-Fi?" dialog's button calls `util/HotspotSettings.open(context)`. `ACTION_WIRELESS_SETTINGS` only reached "More connectivity options" on Xiaomi (MIUI/HyperOS: airplane mode, private DNS, printing, OTG, no hotspot), so Xiaomi/Redmi/POCO phones first try `com.android.settings/.TetherSettings` and two other tether pages, then `android.settings.TETHER_SETTINGS`, then the old action as the last resort; each is tried and skipped if the phone refuses. Unverified on phones (the component names are not public API).
+
+## Release builds (1.0.1-beta.16)
+
+CI now runs `./gradlew assembleRelease` and publishes `app-release.apk` (before, every release was the `debug` build type: signed with the user's key but not minified and debuggable). The `release` build type uses `signingConfigs.flash` (same key, so it updates over the old debug-type installs), R8 minify on, rules in `app/proguard-rules.pro` (Ktor, serialization, logback/slf4j, NFC classes). R8 passed in the sandbox but runtime behaviour is unverified: if something works in beta.15 and breaks in beta.16 (NFC, transfer, updater, logging), suspect missing keep rules first. Local `assembleDebug` is still the compile check; `assembleRelease` locally is unsigned.
