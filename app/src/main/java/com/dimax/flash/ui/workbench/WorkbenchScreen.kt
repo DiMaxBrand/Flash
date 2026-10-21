@@ -671,8 +671,7 @@ fun WorkbenchScreen(
             backdrop = backdrop,
             onDismiss = { viewModel.dismissHotspotPrompt() },
             onEnable = {
-                val intent = android.content.Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS)
-                context.startActivity(intent)
+                com.dimax.flash.util.HotspotSettings.open(context)
                 viewModel.dismissHotspotPrompt()
             }
         )

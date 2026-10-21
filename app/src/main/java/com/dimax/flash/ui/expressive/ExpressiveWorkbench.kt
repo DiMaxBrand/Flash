@@ -356,7 +356,7 @@ fun ExpressiveWorkbench(
                 },
                 confirmButton = {
                     TextButton(onClick = {
-                        context.startActivity(Intent(Settings.ACTION_WIRELESS_SETTINGS))
+                        com.dimax.flash.util.HotspotSettings.open(context)
                         viewModel.dismissHotspotPrompt()
                     }) { Text(stringResource(R.string.hotspot_button_enable)) }
                 },
