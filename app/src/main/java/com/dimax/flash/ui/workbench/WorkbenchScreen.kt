@@ -103,6 +103,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.dimax.flash.FlashApplication
 import com.dimax.flash.isOn
+import com.dimax.flash.ui.hints.HintKind
+import com.dimax.flash.ui.hints.HintsOverlay
 import com.dimax.flash.R
 import com.dimax.flash.handshake.MotherCoreViewfinder
 import com.dimax.flash.handshake.ScanCompletePopup
@@ -163,12 +165,11 @@ fun WorkbenchScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     // ── Handshake mode (Settings): which channels pair the two phones ───────
-    // AUTO = NFC always, plus camera on HyperOS. NFC = NFC only. CAMERA = camera only.
+    // NFC (the default) = pair by touching, camera off. CAMERA = pair by scanning a code, NFC off.
     val handshakeMode by app.themeRepository.handshakeMode
-        .collectAsStateWithLifecycle(HandshakeMode.AUTO)
-    val nfcOn = handshakeMode != HandshakeMode.CAMERA
-    val cameraOn = handshakeMode == HandshakeMode.CAMERA ||
-        (handshakeMode == HandshakeMode.AUTO && DeviceDetector.isHyperOSDevice())
+        .collectAsStateWithLifecycle(HandshakeMode.NFC)
+    val nfcOn = handshakeMode == HandshakeMode.NFC
+    val cameraOn = handshakeMode == HandshakeMode.CAMERA
 
     LaunchedEffect(nfcOn, cameraOn) {
         viewModel.applyHandshakeMode(nfc = nfcOn, camera = cameraOn)
@@ -408,12 +409,74 @@ fun WorkbenchScreen(
         )
     }
 
+    // ── NFC checks, shown whether or not hints are on ──
+    // A phone without NFC cannot pair by touching: say so and switch it to camera mode by itself.
+    val nfcSupported = remember(nfcManager) { nfcManager.isNfcAvailable }
+    var showNoNfc by remember { mutableStateOf(false) }
+    LaunchedEffect(nfcSupported, nfcOn) {
+        if (!nfcSupported && nfcOn) {
+            showNoNfc = true
+            app.themeRepository.setHandshakeMode(HandshakeMode.CAMERA)
+        }
+    }
+    if (showNoNfc) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showNoNfc = false },
+            title = { Text(stringResource(R.string.dialog_no_nfc_title)) },
+            text = { Text(stringResource(R.string.dialog_no_nfc_text)) },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { showNoNfc = false }) {
+                    Text(stringResource(R.string.dialog_ok))
+                }
+            }
+        )
+    }
+    // NFC exists but is switched off: offer to turn it on (it stays asked-about only until it is on again)
+    var nfcOffDismissed by remember { mutableStateOf(false) }
+    LaunchedEffect(uiState.nfcOff) { if (!uiState.nfcOff) nfcOffDismissed = false }
+    if (nfcOn && nfcSupported && uiState.nfcOff && !nfcOffDismissed) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { nfcOffDismissed = true },
+            title = { Text(stringResource(R.string.dialog_nfc_off_title)) },
+            text = { Text(stringResource(R.string.dialog_nfc_off_text)) },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    nfcOffDismissed = true
+                    context.startActivity(Intent(android.provider.Settings.ACTION_NFC_SETTINGS))
+                }) { Text(stringResource(R.string.dialog_nfc_off_open)) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { nfcOffDismissed = true }) {
+                    Text(stringResource(R.string.dialog_not_now))
+                }
+            }
+        )
+    }
+
+    // ── Hints (Settings > Hints): what to do next, drawn over the main screen ──
+    // NFC: receiving needs only a touch, sending needs files chosen first. Camera: only the RECEIVER is told,
+    // and only once the other phone has files ready, to scan its code. The sender in camera mode sees no hints.
+    val showHints by app.themeRepository.showHints.collectAsStateWithLifecycle(false)
+    val hintBusy = uiState.isReceiving || uiState.incoming.isNotEmpty() || uiState.transferProgress > 0f
+    val hintKind: HintKind? = when {
+        !showHints || hintBusy -> null
+        uiState.selectedPhotos.isEmpty() && uiState.cameraHandshakeEnabled &&
+            uiState.colorDetectionState == ColorDetectionState.Detecting -> HintKind.CAMERA_SCAN
+        nfcOn && nfcSupported && !uiState.nfcOff ->
+            if (uiState.selectedPhotos.isEmpty()) HintKind.NFC_IDLE else HintKind.NFC_SEND
+        else -> null
+    }
+    var dismissedHints by remember { mutableStateOf(setOf<HintKind>()) }
+    LaunchedEffect(hintKind) { if (hintKind == null) dismissedHints = emptySet() }
+    val visibleHint = hintKind?.takeIf { it !in dismissedHints }
+
     // ── Interface style: the Material 3 Expressive layout replaces the whole liquid UI ──
     val uiStyle by app.themeRepository.uiStyle.collectAsStateWithLifecycle(UiStyle.LIQUID)
     if (uiStyle == UiStyle.EXPRESSIVE) {
         val handshakeLog by (cameraHandshakeManager ?: app.cameraHandshakeManager)
             .status.collectAsStateWithLifecycle()
         val nfcLog by nfcManager.status.collectAsStateWithLifecycle()
+        Box(modifier = Modifier.fillMaxSize()) {
         ExpressiveWorkbench(
             viewModel = viewModel,
             state = uiState,
@@ -429,6 +492,8 @@ fun WorkbenchScreen(
             picker = photoPicker,
             onOpenSettings = onNavigateToSettings
         )
+        HintsOverlay(visibleHint) { dismissedHints = dismissedHints + it }
+        }
         return
     }
 
@@ -711,6 +776,8 @@ fun WorkbenchScreen(
             coreSizePx = blobSizePx,
             coreScale = coreScale.value
         )
+
+        HintsOverlay(visibleHint) { dismissedHints = dismissedHints + it }
 
         // ── Status, errors and the scan popup: one column ABOVE everything else ──
         // Drawn after MotherCore and the "+" button, and kept in the free band between the

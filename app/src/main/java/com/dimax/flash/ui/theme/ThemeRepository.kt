@@ -13,8 +13,8 @@ import java.io.IOException
 
 enum class ThemeMode { LIGHT, DARK, SYSTEM }
 
-/** How two phones find each other. AUTO = NFC always, plus camera on HyperOS devices. */
-enum class HandshakeMode { AUTO, NFC, CAMERA }
+/** How two phones find each other: by touching (NFC, the default) or by scanning a code with the camera. */
+enum class HandshakeMode { NFC, CAMERA }
 
 /** LIQUID = Mother Core + glass components; EXPRESSIVE = plain Material 3 Expressive (tray + bottom app bar). */
 enum class UiStyle { LIQUID, EXPRESSIVE }
@@ -28,6 +28,10 @@ class ThemeRepository(private val dataStore: DataStore<Preferences>) {
         private val KEY_HANDSHAKE = stringPreferencesKey("handshake_mode")
         private val KEY_UI_STYLE = stringPreferencesKey("ui_style")
         private val KEY_SAVE_RECEIVED = booleanPreferencesKey("save_received")
+        // The welcome was rewritten from scratch (1.0.1-beta.9), so it has its OWN flag: everybody sees it once,
+        // including people who had dismissed the old one ("onboarding_shown" is no longer read).
+        private val KEY_WELCOME_V2 = booleanPreferencesKey("welcome_v2_shown")
+        private val KEY_HINTS = booleanPreferencesKey("show_hints")
     }
 
 
@@ -54,16 +58,27 @@ class ThemeRepository(private val dataStore: DataStore<Preferences>) {
         prefs[KEY_ONBOARD] ?: false
     }
 
+    /** Has the (rewritten) welcome been seen? It is shown once, to everybody. */
+    val welcomeShown: Flow<Boolean> = preferences.map { prefs -> prefs[KEY_WELCOME_V2] ?: false }
+
+    suspend fun setWelcomeShown() {
+        dataStore.edit { it[KEY_WELCOME_V2] = true }
+    }
+
+    /** On-screen hints for people who are not comfortable with phones (off by default). */
+    val showHints: Flow<Boolean> = preferences.map { prefs -> prefs[KEY_HINTS] ?: false }
+
+    suspend fun setShowHints(show: Boolean) {
+        dataStore.edit { it[KEY_HINTS] = show }
+    }
+
     val language: Flow<String> = preferences.map { prefs ->
         prefs[KEY_LANG] ?: ""
     }
 
     val handshakeMode: Flow<HandshakeMode> = preferences.map { prefs ->
-        when (prefs[KEY_HANDSHAKE]) {
-            "NFC"    -> HandshakeMode.NFC
-            "CAMERA" -> HandshakeMode.CAMERA
-            else     -> HandshakeMode.AUTO
-        }
+        // Anything else, including the removed "AUTO" a phone may still have stored, means NFC
+        if (prefs[KEY_HANDSHAKE] == "CAMERA") HandshakeMode.CAMERA else HandshakeMode.NFC
     }
 
     val uiStyle: Flow<UiStyle> = preferences.map { prefs ->

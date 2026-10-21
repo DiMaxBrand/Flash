@@ -7,7 +7,6 @@
     <string name="settings_language">Language</string>
     <string name="settings_theme">Theme</string>
     <string name="settings_handshake">Pairing method</string>
-    <string name="handshake_auto">Auto</string>
     <string name="handshake_nfc">NFC</string>
     <string name="handshake_camera">Camera</string>
     <string name="settings_ui_style">Interface</string>
@@ -122,4 +121,36 @@
     <string name="feature_flag_core_motion_description">The Mother Core leans downhill when you tilt the phone and wobbles when you shake it. Uses the motion sensors.</string>
     <string name="feature_flag_core_3d_title">3D core</string>
     <string name="feature_flag_core_3d_description">The Mother Core becomes a rounded 3D object that stays fixed in space as you turn the phone. It lies flat or stands upright, whichever is closer to how you hold the phone, and the switch is animated. Needs a rotation sensor.</string>
+
+    <!-- Welcome (shown once) -->
+    <string name="welcome_step1_title">Welcome to Flash</string>
+    <string name="welcome_step1_text">Fast file transfer between phones that actually works.</string>
+    <string name="welcome_step2_title">Tap the phones together</string>
+    <string name="welcome_step2_text">Turn on NFC and touch the backs of two phones. Once you see the transfer start, you can pull them apart: they only need to be on the same Wi-Fi. Photos, videos, documents, any file.</string>
+    <string name="welcome_step3_title">No NFC? Use the camera</string>
+    <string name="welcome_step3_text">In Settings, choose Camera on both phones. The receiver scans the sender\'s code and the transfer starts. The phones need the same Wi-Fi, but not to stay close.</string>
+    <string name="welcome_step4_title">Need a hand?</string>
+    <string name="welcome_step4_text">Hints show you on screen what to do. Turn them on in Settings at any time, and off once you know the app.</string>
+    <string name="welcome_hints_switch">Turn on hints</string>
+    <string name="welcome_next">Next</string>
+    <string name="welcome_skip">Skip</string>
+    <string name="welcome_start">Start</string>
+
+    <!-- Hints (Settings > Hints) -->
+    <string name="settings_hints_title">Hints</string>
+    <string name="settings_hints_description">Shows on screen what to do. Handy if you are new to phones; turn it off once you know the app.</string>
+    <string name="hint_nfc_idle">Receiving? Just hold your phone\'s back to the sender\'s. Sending? Tap + to choose files first.</string>
+    <string name="hint_nfc_send">Now hold the backs of both phones together. You can pull them apart once the transfer starts.</string>
+    <string name="hint_nfc_chip_caption">NFC chip: usually here</string>
+    <string name="hint_camera_scan">Point your camera at their code (the blob or the cookie at the top). Get close enough that it fills most of the view, but not so close that it blurs.</string>
+    <string name="hint_tap_to_hide">Tap to hide</string>
+
+    <!-- NFC dialogs -->
+    <string name="dialog_nfc_off_title">NFC is off</string>
+    <string name="dialog_nfc_off_text">Turn on NFC in the phone settings to send and receive by touching phones.</string>
+    <string name="dialog_nfc_off_open">Open settings</string>
+    <string name="dialog_not_now">Not now</string>
+    <string name="dialog_no_nfc_title">No NFC on this phone</string>
+    <string name="dialog_no_nfc_text">Your phone doesn\'t support NFC, unfortunately. Please ask the other person to switch to camera mode. Your phone will be switched to it automatically.</string>
+    <string name="dialog_ok">OK</string>
 </resources>

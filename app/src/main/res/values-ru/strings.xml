@@ -7,7 +7,6 @@
     <string name="settings_language">Язык</string>
     <string name="settings_theme">Тема</string>
     <string name="settings_handshake">Способ соединения</string>
-    <string name="handshake_auto">Авто</string>
     <string name="handshake_nfc">NFC</string>
     <string name="handshake_camera">Камера</string>
     <string name="settings_ui_style">Интерфейс</string>
@@ -122,4 +121,36 @@
     <string name="feature_flag_core_motion_description">Главное ядро скатывается вниз, когда вы наклоняете телефон, и трясётся, когда вы его трясёте. Использует датчики движения.</string>
     <string name="feature_flag_core_3d_title">Объёмное ядро</string>
     <string name="feature_flag_core_3d_description">Главное ядро становится скруглённым объёмным предметом, который остаётся на месте в пространстве, пока вы поворачиваете телефон. Оно лежит или стоит — как ближе к положению телефона, — переход плавный. Нужен датчик вращения.</string>
+
+    <!-- Приветствие (показывается один раз) -->
+    <string name="welcome_step1_title">Добро пожаловать во Флэш</string>
+    <string name="welcome_step1_text">Быстрая передача файлов между телефонами. И она действительно работает.</string>
+    <string name="welcome_step2_title">Приложите телефоны друг к другу</string>
+    <string name="welcome_step2_text">Включите NFC и приложите телефоны задними крышками. Когда увидите, что передача началась, телефоны можно разъединить: нужно только, чтобы они были в одной сети Wi-Fi. Фото, видео, документы — любые файлы.</string>
+    <string name="welcome_step3_title">Нет NFC? Используйте камеру</string>
+    <string name="welcome_step3_text">В настройках выберите режим «Камера» на обоих телефонах. Получатель сканирует код отправителя, и передача начинается. Телефоны должны быть в одной сети Wi-Fi, но держать их рядом не нужно.</string>
+    <string name="welcome_step4_title">Нужна помощь?</string>
+    <string name="welcome_step4_text">Подсказки показывают на экране, что делать. Включите их в настройках в любой момент и выключите, когда освоитесь.</string>
+    <string name="welcome_hints_switch">Включить подсказки</string>
+    <string name="welcome_next">Далее</string>
+    <string name="welcome_skip">Пропустить</string>
+    <string name="welcome_start">Начать</string>
+
+    <!-- Подсказки (Настройки > Подсказки) -->
+    <string name="settings_hints_title">Подсказки</string>
+    <string name="settings_hints_description">Показывают на экране, что делать. Удобно, если вы только осваиваете телефон. Выключите, когда привыкнете.</string>
+    <string name="hint_nfc_idle">Принимаете? Просто приложите телефон задней крышкой к телефону отправителя. Отправляете? Сначала нажмите «+», чтобы выбрать файлы.</string>
+    <string name="hint_nfc_send">Теперь приложите телефоны задними крышками друг к другу. Когда передача начнётся, их можно разъединить.</string>
+    <string name="hint_nfc_chip_caption">Чип NFC обычно здесь</string>
+    <string name="hint_camera_scan">Наведите камеру на их код (пятно или «печенье» вверху экрана). Поднесите так, чтобы он занимал почти весь кадр, но не размывался.</string>
+    <string name="hint_tap_to_hide">Нажмите, чтобы скрыть</string>
+
+    <!-- Диалоги про NFC -->
+    <string name="dialog_nfc_off_title">NFC выключен</string>
+    <string name="dialog_nfc_off_text">Включите NFC в настройках телефона, чтобы передавать и принимать файлы, прикладывая телефоны друг к другу.</string>
+    <string name="dialog_nfc_off_open">Открыть настройки</string>
+    <string name="dialog_not_now">Не сейчас</string>
+    <string name="dialog_no_nfc_title">В этом телефоне нет NFC</string>
+    <string name="dialog_no_nfc_text">К сожалению, ваш телефон не поддерживает NFC. Попросите второго человека переключиться на режим камеры. Ваш телефон переключится на него автоматически.</string>
+    <string name="dialog_ok">Понятно</string>
 </resources>

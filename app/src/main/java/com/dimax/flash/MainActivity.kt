@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import kotlinx.coroutines.flow.first
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.rememberNavController
 import com.dimax.flash.ui.theme.ThemeMode
@@ -44,7 +46,12 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val themeMode by app.themeRepository.themeMode.collectAsState(initial = ThemeMode.SYSTEM)
-            val onboardingShown by app.themeRepository.onboardingShown.collectAsState(initial = false)
+            // Read ONCE, and nothing but the empty background is shown until it is known. It used to start as
+            // "not shown" and flip to "shown" a moment later, which flashed the welcome for a second at every
+            // start; and the start screen must not change again when the welcome is completed.
+            val welcomeShown by produceState<Boolean?>(initialValue = null) {
+                value = app.themeRepository.welcomeShown.first()
+            }
             val navController = rememberNavController()
 
             FlashTheme(themeMode = themeMode) {
@@ -62,15 +69,17 @@ class MainActivity : ComponentActivity() {
                         .fillMaxSize()
                         .background(MaterialTheme.colorScheme.background.copy(alpha = rootAlpha))
                 ) {
-                    NavGraph(
-                        navController = navController,
-                        startDestination = if (onboardingShown) Screen.Main.route else Screen.Onboarding.route,
-                        themeRepository = app.themeRepository,
-                        transferRepository = app.transferRepository,
-                        nfcManager = nfcManager,
-                        cameraHandshakeManager = app.cameraHandshakeManager,
-                        updateController = app.updateController
-                    )
+                    welcomeShown?.let { shown ->
+                        NavGraph(
+                            navController = navController,
+                            startDestination = if (shown) Screen.Main.route else Screen.Onboarding.route,
+                            themeRepository = app.themeRepository,
+                            transferRepository = app.transferRepository,
+                            nfcManager = nfcManager,
+                            cameraHandshakeManager = app.cameraHandshakeManager,
+                            updateController = app.updateController
+                        )
+                    }
                 }
                 // The update bottom sheet appears over whichever screen is open
                 UpdateSheetHost(app.updateController, themeMode)

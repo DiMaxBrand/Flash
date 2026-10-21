@@ -133,10 +133,11 @@ private fun ColumnScope.SettingsGroups(
 ) {
     val scope = rememberCoroutineScope()
     val themeMode by themeRepository.themeMode.collectAsStateWithLifecycle(ThemeMode.SYSTEM)
-    val handshake by themeRepository.handshakeMode.collectAsStateWithLifecycle(HandshakeMode.AUTO)
+    val handshake by themeRepository.handshakeMode.collectAsStateWithLifecycle(HandshakeMode.NFC)
     val uiStyle by themeRepository.uiStyle.collectAsStateWithLifecycle(UiStyle.LIQUID)
     val language by themeRepository.language.collectAsStateWithLifecycle("")
     val saveReceived by themeRepository.saveReceived.collectAsStateWithLifecycle(true)
+    val showHints by themeRepository.showHints.collectAsStateWithLifecycle(false)
 
     ChoiceGroup(
         title = stringResource(R.string.settings_theme),
@@ -157,7 +158,6 @@ private fun ColumnScope.SettingsGroups(
         selected = handshake,
         label = {
             when (it) {
-                HandshakeMode.AUTO -> stringResource(R.string.handshake_auto)
                 HandshakeMode.NFC -> stringResource(R.string.handshake_nfc)
                 HandshakeMode.CAMERA -> stringResource(R.string.handshake_camera)
             }
@@ -196,6 +196,25 @@ private fun ColumnScope.SettingsGroups(
                 modifier = Modifier.weight(1f)
             )
             Switch(checked = saveReceived, onCheckedChange = { scope.launch { themeRepository.setSaveReceived(it) } })
+        }
+    }
+
+    // Hints: step-by-step help drawn on the main screen, for people who are not comfortable with phones
+    ExpressiveGroupRow(GroupPosition.SINGLE) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(Modifier.weight(1f).padding(end = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(stringResource(R.string.settings_hints_title), style = MaterialTheme.typography.titleMedium)
+                Text(
+                    stringResource(R.string.settings_hints_description),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(checked = showHints, onCheckedChange = { scope.launch { themeRepository.setShowHints(it) } })
         }
     }
 
