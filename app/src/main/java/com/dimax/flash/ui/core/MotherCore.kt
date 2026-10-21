@@ -147,9 +147,9 @@ fun MotherCore(
     val p = spawn.value
     val blobPx = with(density) { blobSize.toPx() }
     val startScale = if (cutoutSizePx > 0f) (cutoutSizePx / blobPx).coerceIn(0.05f, 0.35f) else 0.1f
-    val grow = 1f - (1f - (p / 0.5f).coerceIn(0f, 1f)).let { it * it * it }
-    val spawnScale = if (spawnReady) startScale + (1f - startScale) * grow else 0f
-    val move = smooth01((p - 0.35f) / 0.65f)
+    val move = smooth01((p - 0.1f) / 0.9f)
+    // it grows only as fast as it travels, so it never fills the top of the screen while still at the camera
+    val spawnScale = if (spawnReady) startScale + (1f - startScale) * move else 0f
     val spawnTx = cutoutOffset.x * (1f - move)
     val spawnTy = cutoutOffset.y * (1f - move)
     val spawnBlack = 1f - smooth01((p - 0.55f) / 0.4f)
