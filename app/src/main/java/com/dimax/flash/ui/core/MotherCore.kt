@@ -17,7 +17,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
@@ -78,17 +81,11 @@ fun MotherCore(
     val isDark = isSystemInDarkTheme()
     val density = androidx.compose.ui.platform.LocalDensity.current
 
-    val infiniteTransition = rememberInfiniteTransition(label = "core")
-    val timeFraction by infiniteTransition.animateFloat(
-        initialValue  = 0f,
-        targetValue   = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2_700, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label         = "timeFraction"
-    )
-    val time = timeFraction * 1000f
+    // A clock that never restarts (same pace as before: 1000 units per 2.7 s). The old 0..1000 animation
+    // jumped back to 0 every 2.7 s, and the noise and the highlight both jumped with it.
+    val seconds by rememberContinuousTime()
+    val timeD = seconds * (1000.0 / 2.7)
+    val time = timeD.toFloat()
 
     // Feature flag "core reacts to motion": lean downhill, spring jiggle, rounder blob when shaken
     val tiltOn = motion != null && motion.tilt
@@ -97,7 +94,7 @@ fun MotherCore(
     val motionTy = if (tiltOn) (motion!!.driftY * 10f + motion.jiggleY) * density.density else 0f
     // Feature flag "3D core": the puck's axes from the phone's orientation (null = the flat 2D core)
     val frame = if (motion != null && motion.threeD) {
-        motion.rotation?.let { coreFrame(it, motion.standFraction.value, motion.yaw.value) }
+        motion.rotation?.let { coreFrame(it, motion.standFraction.value, motion.yaw) }
     } else null
 
     val hollowProgress by animateFloatAsState(
@@ -156,7 +153,7 @@ fun MotherCore(
         val blobCx   = with(density) { blobSize.toPx() / 2f }
 
         val blobPath = remember(time, baseRPx, noiseRPx, blobCx) {
-            buildBlobPath(blobCx, blobCx, baseRPx, noiseRPx, time.toDouble())
+            buildBlobPath(blobCx, blobCx, baseRPx, noiseRPx, timeD)
         }
 
         // Everything is clipped to the morphing blob itself: no static circle anywhere.
@@ -170,10 +167,41 @@ fun MotherCore(
             }
         }
 
-        // Feature flag "3D core": the rounded rim and back of the puck, drawn under the flat core
-        if (frame != null) {
+        // Feature flag "3D core": a glass puck. What is behind it is refracted over its WHOLE outline (rim and
+        // front) in screen space, so the picture behind is never tilted along with the face; soft gradients
+        // and edge lines are laid over that. The flat core below only carries highlights, colour and content.
+        val projection = if (frame != null) projectCore(blobPath, frame, baseRPx, blobCx * 2f) else null
+        if (projection != null) {
+            val silhouetteShape = pathShape(projection.silhouette)
+            if (backdrop != null) {
+                Box(modifier = Modifier.fillMaxSize().clip(silhouetteShape)) {
+                    Box(
+                        modifier = Modifier
+                            .offset {
+                                IntOffset(
+                                    projection.bounds.left.roundToInt(),
+                                    projection.bounds.top.roundToInt()
+                                )
+                            }
+                            .size(
+                                with(density) { projection.bounds.width.toDp() },
+                                with(density) { projection.bounds.height.toDp() }
+                            )
+                            .drawBackdrop(
+                                backdrop = backdrop,
+                                shape = { RoundedCornerShape(50) },
+                                effects = {
+                                    lens(16f.dp.toPx(), 32f.dp.toPx())
+                                },
+                                onDrawSurface = {
+                                    drawRect(AquaGlow.copy(alpha = 0.10f))
+                                }
+                            )
+                    )
+                }
+            }
             Canvas(modifier = Modifier.fillMaxSize()) {
-                drawCoreBody(blobPath, frame, baseRPx, accentColor, accentAlpha)
+                drawCoreGlass(projection, accentColor, accentAlpha)
             }
         }
         // ...and the flat core itself becomes the puck's front: its whole drawing goes through a
@@ -208,7 +236,7 @@ fun MotherCore(
         // The backdrop lens only supports rounded-rect SDF shapes, so it renders in a
         // circle and the result is clipped to the morphing blob. Skipped while the
         // camera is showing (the lens would hide it).
-        if (backdrop != null && !viewfinderActive) {
+        if (backdrop != null && !viewfinderActive && projection == null) {
             val blobDiameterDp = with(density) { ((baseRPx + noiseRPx) * 2).toDp() }
             Box(
                 modifier = Modifier
@@ -237,8 +265,8 @@ fun MotherCore(
         // With the motion flag on (and no 3D lighting of its own) the highlight also slides against the tilt
         val tiltLightX = if (tiltOn && frame == null) -motion!!.driftX * baseRPx * 0.22f else 0f
         val tiltLightY = if (tiltOn && frame == null) -motion!!.driftY * baseRPx * 0.22f else 0f
-        val specularShiftX = (sin(time * 0.00063 * PI) * baseRPx * 0.12f).toFloat() + tiltLightX
-        val specularShiftY = (cos(time * 0.00047 * PI) * baseRPx * 0.09f).toFloat() + tiltLightY
+        val specularShiftX = (sin(timeD * 0.00063 * PI) * baseRPx * 0.12f).toFloat() + tiltLightX
+        val specularShiftY = (cos(timeD * 0.00047 * PI) * baseRPx * 0.09f).toFloat() + tiltLightY
 
         // Tint (the sender's colour / lock-on colour): flat so the other phone's camera can read its hue
         if (accentColor != null && accentAlpha > 0f) {

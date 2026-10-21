@@ -66,8 +66,13 @@ class CoreMotionState(
         private set
     /** 0 = the core lies flat, 1 = it stands upright; animated when the phone is moved across the middle. */
     val standFraction = Animatable(0f)
-    /** Which way (a horizontal angle in the world) the core faces when it stands; follows the viewer at each switch. */
-    val yaw = Animatable(0f)
+    /**
+     * The horizontal angle from the core towards the viewer. It follows the phone's heading, so turning
+     * the phone about the vertical axis (a horizontal turn) never swings the core away: only tilting
+     * the phone (forward, back, sideways) shows the core from another side.
+     */
+    var yaw by mutableFloatStateOf(0f)
+        private set
 
     private val matrix = FloatArray(9)
     private var poseKnown = false
@@ -107,43 +112,27 @@ class CoreMotionState(
         SensorManager.getRotationMatrixFromVector(matrix, values)
         val r = matrix.copyOf()
         rotation = r
+        // The core always faces whoever is looking, so its heading follows the phone's heading almost at once
+        val target = viewerYaw(r)
+        if (target != null) yaw = if (!poseKnown) target else yaw + wrapPi(target - yaw) * 0.5f
         // How much the screen faces the ceiling or the floor: 1 flat, 0 upright
         val flat = abs(r[8])
         if (!poseKnown) {
             poseKnown = true
             standing = flat < 0.707f
-            val target = viewerYaw(r) ?: 0f
-            scope.launch {
-                standFraction.snapTo(if (standing) 1f else 0f)
-                yaw.snapTo(target)
-            }
+            scope.launch { standFraction.snapTo(if (standing) 1f else 0f) }
         } else if (standing && flat > 0.80f) {
-            switchTo(false, r)
+            switchTo(false)
         } else if (!standing && flat < 0.62f) {
-            switchTo(true, r)
+            switchTo(true)
         }
     }
 
-    private fun switchTo(stand: Boolean, r: FloatArray) {
+    private fun switchTo(stand: Boolean) {
         standing = stand
-        val spec = tween<Float>(700, easing = FastOutSlowInEasing)
-        scope.launch { standFraction.animateTo(if (stand) 1f else 0f, spec) }
-        viewerYaw(r)?.let { target ->
-            val current = yaw.value
-            val turn = wrapPi(target - current)
-            scope.launch { yaw.animateTo(current + turn, spec) }
+        scope.launch {
+            standFraction.animateTo(if (stand) 1f else 0f, tween(700, easing = FastOutSlowInEasing))
         }
-    }
-
-    /**
-     * The horizontal direction from the core towards whoever is looking at the phone: where the screen
-     * points, plus a little of where the bottom edge points (so a phone lying flat still has a front).
-     */
-    private fun viewerYaw(r: FloatArray): Float? {
-        val x = r[2] - 0.6f * r[1]
-        val y = r[5] - 0.6f * r[4]
-        if (hypot(x, y) < 0.05f) return null
-        return atan2(y, x)
     }
 
     private fun wrapPi(angle: Float): Float {
@@ -153,6 +142,35 @@ class CoreMotionState(
         while (a < -PI) a += twoPi
         return a
     }
+}
+
+/**
+ * The horizontal direction from the core towards whoever is looking at the phone, from the phone to
+ * world rotation [r]. An upright phone says it with where the screen points; a phone lying flat has no
+ * horizontal screen direction, so there it is where the bottom edge points. The two are blended by how
+ * upright the phone is. Turning the phone about the vertical axis turns this angle by the same amount,
+ * which is what keeps the core facing the viewer through a horizontal turn.
+ */
+internal fun viewerYaw(r: FloatArray): Float? {
+    val nx = r[2]
+    val ny = r[5]       // the screen's normal in the world
+    val bx = -r[1]
+    val by = -r[4]      // the bottom edge's direction in the world
+    val nh = hypot(nx, ny)
+    val bh = hypot(bx, by)
+    val upright = ((nh - 0.15f) / 0.35f).coerceIn(0f, 1f)
+    var x = 0f
+    var y = 0f
+    if (nh > 1e-4f) {
+        x += upright * nx / nh
+        y += upright * ny / nh
+    }
+    if (bh > 1e-4f) {
+        x += (1f - upright) * bx / bh
+        y += (1f - upright) * by / bh
+    }
+    if (hypot(x, y) < 0.05f) return null
+    return atan2(y, x)
 }
 
 /**

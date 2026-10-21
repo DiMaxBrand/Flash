@@ -119,7 +119,7 @@ infiniteRepeatable(
 - **Visual result**: Back-and-forth motion; visible slowdown/reversal at midpoint
 - **Gotcha**: Looks bouncy if the motion is directional; causes artificial "breathing" artifacts
 
-**Rule for Flash**: Use `Restart` for Perlin noise morphing (blob, photo edges) and `Reverse` only for intentional oscillations.
+**Rule for Flash**: `Restart` only for truly periodic motion (an angle running 0..2π, a sine). Perlin noise is NOT periodic, so never drive it with a 0..N animation that restarts: it jumps at the loop point (a visible snap, found in 1.0.1-beta.7). Drive noise with `rememberContinuousTime()` (`ui/core/ContinuousTime.kt`, seconds that only count up). `Reverse` only for intentional oscillations.
 
 ### Mother Core (Liquid Glass Blob)
 
@@ -151,7 +151,7 @@ val time by infiniteTransition.animateFloat(
 ```
 - `time` drives Perlin noise via `updateBlobPath()`
 - Perlin noise is deterministic: `noise(cos(angle)*1.5 + time*0.0004, sin(angle)*1.5 + time*0.0004)` produces smooth morphing
-- At `time=1000`, the noise state returns to `time=0` state, so `Restart` loops seamlessly
+- This is the OLD loop. Its claim that the noise returns to the same state at `time=1000` was wrong (the noise offset is `time*0.0004`, so it jumped back 0.4 units every 2.7 s, and the highlight phases jumped too). Since 1.0.1-beta.7 `time` comes from `rememberContinuousTime()` at the same pace (1000 units per 2.7 s) and never restarts
 
 #### Specular Highlights
 ```kotlin
@@ -201,7 +201,7 @@ val blobTime by infiniteTransition.animateFloat(
     animationSpec = infiniteRepeatable(tween(12_000, easing = LinearEasing))
 )
 ```
-- 12-second cycle for visible edge morphing on each thumbnail
+- Visible edge morphing on each thumbnail, 1000 noise units per 12 s, from `rememberContinuousTime()` (it used to be a 0..1000 loop that snapped every 12 s)
 - Uses same Perlin noise logic as Mother Core
 - Each photo gets unique morphing based on: `photoBlobTime = (blobTime + phaseOffset * 137f)`
 
@@ -216,8 +216,7 @@ val radialDrift by infiniteTransition.animateFloat(
     )
 )
 ```
-- 4-second cycle, drifts ±8dp from base orbit radius
-- Changed to `Restart` to avoid bounce at reversal
+- 4-second smooth swing, 0..8dp out from the base orbit radius (a cosine of the continuous clock). It used to be a sawtooth that jumped back every 4 s
 
 #### Photo Lifecycle
 - **Entry**: Spring animation (600ms, dampingRatio 0.6, stiffness 150)
@@ -479,7 +478,7 @@ After major merges or pushes:
 ## Questions for Future Me
 
 **Q: Why RepeatMode.Restart for blob morphing?**
-A: Perlin noise is cyclic. At time=0 and time=1000, the noise state is identical. Restart loops cleanly; Reverse creates a bounce at the turnaround that looks unnatural.
+A: It should NOT. Perlin noise is not cyclic: restarting a 0..1000 clock jumps the shape (a snap). Use the forward-only clock `rememberContinuousTime()`. `Restart` is only right for periodic motion such as an angle.
 
 **Q: Why NOISE_OFFSET_DP = 20f?**
 A: Gives ~16dp unused space before hitting container boundary. Conservative for safety while providing visible morphing variety.
@@ -532,5 +531,5 @@ Experimental, English-only screen in `playground/`. **Contact card** (beta.3): "
 
 Same idea as Impulse (`FeatureFlags.kt` + `FeatureFlagPreferences` + a flags screen that iterates the registry). `FeatureFlags.kt` holds `enum FeatureFlag(key, titleRes, descriptionRes, defaultValue)` and `FeatureFlagStore` (plain SharedPreferences overrides, a key absent = Default, an `overrides` StateFlow; `Map<FeatureFlag, Boolean?>.isOn(flag)` resolves it). `FlashApplication.featureFlags` is the store. Settings iterates `FeatureFlag.entries` with the existing `ChoiceGroup` (Default / On / Off): a new flag only needs an enum entry and its two strings (EN + RU). Both current flags are off by default and independent:
 - **CORE_MOTION** ("Core reacts to motion"): `CoreMotionState.onGravity/onLinear`. The Mother Core drifts up to 10 dp downhill when the phone tilts, a spring-damper (`onLinear`, about 1 dp per m/s2 of acceleration, clamped to 20 dp) pushes it against shaking, and `shake` (0..1) adds up to 8 dp of blob noise. The highlight also slides against the tilt (when 3D is off).
-- **CORE_3D** ("3D core"): `CoreBody3D.kt`. A game rotation vector (fallback rotation vector) gives the phone's orientation `R` (phone to world, z up). The core is a rounded puck fixed in the world: its axes `ex/ey/ez` come from `coreFrame(R, standFraction, yaw)`. It LIES (face up) or STANDS (face towards the viewer); `standFraction` is animated 700 ms when the phone crosses the middle (`|R[8]|` below 0.62 = stand, above 0.80 = lie, hysteresis), and `yaw` (where the viewer is) is re-latched at each switch and animated. Orientation follows the phone immediately. The puck's rim is drawn from the same morphing outline (`drawCoreBody`, 7 rings x 44 points, flat-shaded quads with a fixed light), and the existing flat 2D core is the puck's front: `drawWithContent` + `Canvas.concat` of a perspective matrix from `android.graphics.Matrix.setPolyToPoly` (`coreFaceMatrix`), nothing is drawn while the front is edge-on or turned away. Both flags on = tilt/jiggle offsets and orientation together.
+- **CORE_3D** ("3D core"): `CoreBody3D.kt`. A game rotation vector (fallback rotation vector) gives the phone's orientation `R` (phone to world, z up). The core is a rounded puck fixed in the world: its axes `ex/ey/ez` come from `coreFrame(R, standFraction, yaw)`. It LIES (face up) or STANDS (face towards the viewer); `standFraction` is animated 700 ms when the phone crosses the middle (`|R[8]|` below 0.62 = stand, above 0.80 = lie, hysteresis), and `yaw` (the horizontal direction from the core towards the viewer) follows the phone's heading continuously (`viewerYaw`: where the screen points when the phone is upright, where its bottom edge points when it lies flat), so turning the phone horizontally never turns the core away; only tilting shows it from another side (`CoreFrameTest.aHorizontalTurnNeverChangesWhatYouSee`). Orientation follows the phone immediately. It is GLASS, not a coloured body: `projectCore` projects 7 slices of the rounded rim of the same morphing outline and takes the convex outline of all of them as ONE smooth silhouette; the backdrop is refracted over that whole silhouette in SCREEN space (`drawBackdrop` lens in a box sized to the silhouette, clipped to it, drawn under the face so the picture behind is never tilted along with the face); `drawCoreGlass` only adds a faint body, a Fresnel edge, one light/shade sweep and thin edge lines, no colour of its own (the first version drew faceted aqua quads and tilted the lens with the face: it read as a mosaic and as a sticker). The existing flat 2D core is the puck's front: `drawWithContent` + `Canvas.concat` of a perspective matrix from `android.graphics.Matrix.setPolyToPoly` (`coreFaceMatrix`), nothing is drawn while the front is edge-on or turned away. Both flags on = tilt/jiggle offsets and orientation together.
 `rememberCoreMotion(tilt, threeD)` registers the sensors only while the screen is resumed and returns null when both flags are off, so with the flags off nothing changes. `CoreFrameTest` checks the geometry (face-on in both poses, orthonormal axes, fixed in the room). Verified only by compiling and that test: the look, the perspective transform on the camera viewfinder and the featured-photo reveal, and the sensor feel are unverified on phones.

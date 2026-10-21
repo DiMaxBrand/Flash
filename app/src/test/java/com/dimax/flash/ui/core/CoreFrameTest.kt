@@ -35,6 +35,41 @@ class CoreFrameTest {
         r[6] * v[0] + r[7] * v[1] + r[8] * v[2]
     )
 
+    /** The phone turned about the vertical axis by [angle]: a horizontal turn. */
+    private fun turnedHorizontally(r: FloatArray, angle: Float): FloatArray {
+        val c = cos(angle)
+        val s = sin(angle)
+        // world' = Rz(angle) * world, so the new matrix is Rz * r
+        val rz = floatArrayOf(c, -s, 0f, s, c, 0f, 0f, 0f, 1f)
+        val out = FloatArray(9)
+        for (i in 0 until 3) for (j in 0 until 3) {
+            var sum = 0f
+            for (k in 0 until 3) sum += rz[i * 3 + k] * r[k * 3 + j]
+            out[i * 3 + j] = sum
+        }
+        return out
+    }
+
+    @Test
+    fun aHorizontalTurnNeverChangesWhatYouSee() {
+        // Upright, a little tilted back, and flat: turn each one right round. The core faces the viewer
+        // through the whole turn, so its axes in the phone's own frame (what you see) stay the same.
+        for (base in listOf(upright, tilted(0.5f), tilted(1.2f), identity)) {
+            for (standFraction in listOf(0f, 0.5f, 1f)) {
+                val yaw0 = viewerYaw(base) ?: continue
+                val expected = coreFrame(base, standFraction, yaw0)
+                for (step in 1 until 12) {
+                    val turned = turnedHorizontally(base, step * (PI / 6).toFloat())
+                    val yaw = viewerYaw(turned) ?: continue
+                    val frame = coreFrame(turned, standFraction, yaw)
+                    assertAxis(expected.ex, frame.ex)
+                    assertAxis(expected.ey, frame.ey)
+                    assertAxis(expected.ez, frame.ez)
+                }
+            }
+        }
+    }
+
     @Test
     fun uprightPhoneSeesTheStandingCoreFaceOn() {
         // Standing, facing the viewer's side (yaw 0): the core's axes are the phone's own

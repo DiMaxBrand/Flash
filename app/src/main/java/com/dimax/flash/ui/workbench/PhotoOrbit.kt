@@ -81,22 +81,12 @@ fun PhotoOrbit(
         label = "orbit_time"
     )
 
-    val blobTime by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue  = 1000f,
-        animationSpec = infiniteRepeatable(tween(12_000, easing = LinearEasing)),
-        label = "blob_time"
-    )
-
-    val radialDrift by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue  = with(density) { 8.dp.toPx() },
-        animationSpec = infiniteRepeatable(
-            animation = tween(4000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "radial_drift"
-    )
+    // The photo edges' noise and the in-and-out drift used to restart from zero (the noise is not periodic and
+    // the drift was a sawtooth), which snapped at every loop point. A clock that only moves forward, and a
+    // smooth swing for the drift, have no seam. The orbit angle above is periodic, so it can stay.
+    val seconds by com.dimax.flash.ui.core.rememberContinuousTime()
+    val blobTime = (seconds * (1000.0 / 12.0)).toFloat()
+    val radialDrift = with(density) { 8.dp.toPx() } * (0.5f - 0.5f * cos(2.0 * PI * seconds / 4.0).toFloat())
 
     val baseOrbitRadiusPx = with(density) { 100.dp.toPx() }
     val photoSizeDp = 56.dp
