@@ -113,7 +113,7 @@
 
     <!-- Feature flags (experiments, off by default) -->
     <string name="feature_flags_title">Feature flags</string>
-    <string name="feature_flags_disclaimer">Early features, off by default. They may look rough and can change or disappear.</string>
+    <string name="feature_flags_disclaimer">Early features, some on by default. They may look rough and can change or disappear.</string>
     <string name="feature_flag_option_default">Default</string>
     <string name="feature_flag_option_on">On</string>
     <string name="feature_flag_option_off">Off</string>

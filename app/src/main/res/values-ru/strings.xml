@@ -113,7 +113,7 @@
 
     <!-- Флаги функций (эксперименты, по умолчанию выключены) -->
     <string name="feature_flags_title">Флаги функций</string>
-    <string name="feature_flags_disclaimer">Ранние функции, по умолчанию выключены. Могут выглядеть сыро, меняться или исчезнуть.</string>
+    <string name="feature_flags_disclaimer">Ранние функции, часть включена по умолчанию. Могут выглядеть сыро, меняться или исчезнуть.</string>
     <string name="feature_flag_option_default">По умолчанию</string>
     <string name="feature_flag_option_on">Вкл.</string>
     <string name="feature_flag_option_off">Выкл.</string>

@@ -24,7 +24,7 @@ enum class FeatureFlag(
         key = "core_motion",
         titleRes = R.string.feature_flag_core_motion_title,
         descriptionRes = R.string.feature_flag_core_motion_description,
-        defaultValue = false
+        defaultValue = true
     ),
 
     /** Draws where the app thinks the front camera is (the core is born from there), to check it sees it right. */
@@ -40,7 +40,7 @@ enum class FeatureFlag(
         key = "core_3d",
         titleRes = R.string.feature_flag_core_3d_title,
         descriptionRes = R.string.feature_flag_core_3d_description,
-        defaultValue = false
+        defaultValue = true
     )
 }
 
