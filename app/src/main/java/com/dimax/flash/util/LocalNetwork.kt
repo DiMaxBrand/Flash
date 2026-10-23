@@ -49,10 +49,23 @@ object LocalNetwork {
         return !cgnat
     }
 
+    private val HOTSPOT_IF = Regex("^(swlan|ap|softap)\\d*$")
+
     private val WIFI_IF = Regex("^(wlan|swlan|ap|softap|p2p)[-\\w]*\\d*$")
 
     /** This phone's LAN IPv4: the real Wi-Fi network first, then Wi-Fi/hotspot interfaces. */
     fun localIpv4(context: Context): String? {
+        // Hosting a hotspot: the phones joining it are on the hotspot's own network, so that address wins even if
+        // this phone is also a client of another Wi-Fi (e.g. one that needs a login). Samsung: swlan0, others: ap0.
+        runCatching {
+            NetworkInterface.getNetworkInterfaces().toList()
+                .filter { it.isUp && !it.isLoopback && HOTSPOT_IF.matches(it.name) }
+                .flatMap { it.inetAddresses.toList() }
+                .filterIsInstance<Inet4Address>()
+                .firstOrNull { isUsableLanIpv4(it) }
+                ?.hostAddress
+                ?.let { return it }
+        }
         runCatching {
             val wifi = wifiNetwork(context)
             if (wifi != null) {

@@ -155,4 +155,5 @@
     <string name="dialog_no_nfc_title">No NFC on this phone</string>
     <string name="dialog_no_nfc_text">Your phone doesn\'t support NFC, unfortunately. Please ask the other person to switch to camera mode. Your phone will be switched to it automatically.</string>
     <string name="dialog_ok">OK</string>
+    <string name="sender_has_no_network">The other phone has no network address yet. Turn its Wi-Fi or hotspot on, then touch again.</string>
 </resources>

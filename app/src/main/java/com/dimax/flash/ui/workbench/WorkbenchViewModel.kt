@@ -591,6 +591,20 @@ class WorkbenchViewModel(
             _uiState.update { it.copy(isWifiConnected = connected) }
         }
         checkHotspotPromptVisibility()
+        republishIfAddressChanged(context)
+    }
+
+    /**
+     * The sender's code holds its Wi-Fi address. Selecting photos BEFORE switching the hotspot on published
+     * 127.0.0.1 (no network yet) and the code was never updated, so the receiver tried to connect to itself
+     * ("Connection refused", seen with a Samsung hotspot). When the address changes, publish the code again.
+     */
+    private fun republishIfAddressChanged(context: Context) {
+        if (currentPort == 0 || simActive) return
+        val ip = transferRepository.getLocalIp(context)
+        if (ip == currentIp) return
+        currentIp = ip
+        publishHandshakes(ip)
     }
 
     private fun checkHotspotPromptVisibility() {
@@ -829,6 +843,19 @@ class WorkbenchViewModel(
     }
 
     private fun onNfcPeerDetected(handshake: PeerHandshake) {
+        if (nfcEnabled && _uiState.value.selectedPhotos.isEmpty() &&
+            (handshake.ip.startsWith("127.") || handshake.ip == "0.0.0.0")
+        ) {
+            // The sender had no network address when it published the code (older builds never re-published it).
+            // Connecting would only reach THIS phone, so say what is wrong instead.
+            val message = FlashApplication.instance.getString(com.dimax.flash.R.string.sender_has_no_network)
+            _uiState.update { it.copy(transferError = message) }
+            viewModelScope.launch {
+                delay(8000)
+                _uiState.update { if (it.transferError == message) it.copy(transferError = null) else it }
+            }
+            return
+        }
         if (nfcEnabled && _uiState.value.selectedPhotos.isEmpty()) {
             _uiState.update { it.copy(nfcState = NfcUiState.PeerDetected(handshake), isReceiving = true) }
         }

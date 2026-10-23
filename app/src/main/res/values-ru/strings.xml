@@ -155,4 +155,5 @@
     <string name="dialog_no_nfc_title">В этом телефоне нет NFC</string>
     <string name="dialog_no_nfc_text">К сожалению, ваш телефон не поддерживает NFC. Попросите второго человека переключиться на режим камеры. Ваш телефон переключится на него автоматически.</string>
     <string name="dialog_ok">Понятно</string>
+    <string name="sender_has_no_network">У другого телефона пока нет сетевого адреса. Включите на нём Wi-Fi или точку доступа и коснитесь снова.</string>
 </resources>
